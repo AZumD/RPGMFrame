@@ -19,6 +19,11 @@ DEFAULT_DOWNLOAD_ROOT = "https://dl.nwjs.io"
 
 ProgressCallback = Callable[[str], None]
 
+_HTTP_HEADERS = {
+    "User-Agent": "RPGMFrame/0.0.1 (+https://github.com/AZumD/RPGMFrame)",
+    "Accept": "*/*",
+}
+
 
 class RuntimeError(RuntimeError):
     """Raised when an NW.js runtime cannot be resolved safely."""
@@ -94,9 +99,15 @@ def _safe_extract(archive: Path, destination: Path) -> None:
         tar.extractall(destination)
 
 
+def _request(url: str) -> urllib.request.Request:
+    # dl.nwjs.io may reject Python urllib's default User-Agent at the edge.
+    # Send an explicit project identity for both checksum and archive requests.
+    return urllib.request.Request(url, headers=_HTTP_HEADERS)
+
+
 def _download(url: str, destination: Path) -> None:
     try:
-        with urllib.request.urlopen(url, timeout=60) as response:
+        with urllib.request.urlopen(_request(url), timeout=60) as response:
             with destination.open("wb") as handle:
                 shutil.copyfileobj(response, handle, length=1024 * 1024)
     except (OSError, urllib.error.URLError) as exc:
@@ -105,7 +116,7 @@ def _download(url: str, destination: Path) -> None:
 
 def _download_text(url: str) -> str:
     try:
-        with urllib.request.urlopen(url, timeout=30) as response:
+        with urllib.request.urlopen(_request(url), timeout=30) as response:
             data = response.read()
     except (OSError, urllib.error.URLError) as exc:
         raise RuntimeError(f"Failed to download {url}: {exc}") from exc
