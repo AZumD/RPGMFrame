@@ -224,6 +224,7 @@ def _is_windows_runtime_baggage(path: Path) -> bool:
     name = path.name.lower()
     return (
         name in _WINDOWS_RUNTIME_ROOT_NAMES
+        or re.fullmatch(r"nw_\d+_percent\.pak", name) is not None
         or path.suffix.lower() in _WINDOWS_RUNTIME_ROOT_SUFFIXES
     )
 

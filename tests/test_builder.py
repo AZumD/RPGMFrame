@@ -243,6 +243,8 @@ def test_preserves_mv_package_root_companions_without_windows_runtime(
     _write(wrapper / "steam_appid.txt", "123456\n")
     _write(wrapper / "Game.exe", "windows runtime")
     _write(wrapper / "nw.dll", "windows runtime")
+    _write(wrapper / "nw_100_percent.pak", "windows runtime")
+    _write(wrapper / "nw_200_percent.pak", "windows runtime")
 
     runtime = _runtime(tmp_path / "nwjs")
     output = tmp_path / "built"
@@ -252,6 +254,8 @@ def test_preserves_mv_package_root_companions_without_windows_runtime(
     assert (output / "steam_appid.txt").read_text(encoding="utf-8") == "123456\n"
     assert not (output / "Game.exe").exists()
     assert not (output / "nw.dll").exists()
+    assert not (output / "nw_100_percent.pak").exists()
+    assert not (output / "nw_200_percent.pak").exists()
     assert any("package-root companion" in warning for warning in result.warnings)
 
 
