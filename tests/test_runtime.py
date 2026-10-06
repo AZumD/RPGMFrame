@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from rpgmframe.runtime import RuntimeError, RuntimeManager
+from rpgmframe.runtime import RuntimeError, RuntimeManager, _request
 
 
 def _write_elf(path: Path, machine: int = 183) -> None:
@@ -109,3 +109,11 @@ def test_rejects_archive_path_traversal(tmp_path: Path) -> None:
 
     with pytest.raises(RuntimeError, match="unsafe path"):
         manager.ensure_nwjs(version)
+
+
+def test_http_request_uses_explicit_user_agent() -> None:
+    request = _request("https://dl.nwjs.io/v0.117.0/SHASUMS256.txt")
+
+    assert request.get_header("User-agent")
+    assert not request.get_header("User-agent").startswith("Python-urllib")
+    assert request.get_header("Accept") == "*/*"
