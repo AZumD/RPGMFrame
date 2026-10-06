@@ -24,6 +24,7 @@ _VERSION_RE = re.compile(
 @dataclass(frozen=True)
 class _Candidate:
     engine: EngineVariant
+    source_root: Path
     game_root: Path
     core_file: Path
     score: int
@@ -63,6 +64,7 @@ def _read_text_head(path: Path, limit: int = 131072) -> str | None:
 
 
 def _score_candidate(
+    evidence_root: Path,
     source_root: Path,
     *,
     engine: EngineVariant,
@@ -73,27 +75,28 @@ def _score_candidate(
     if not core.is_file():
         return None
 
-    evidence: list[str] = [_relative(core, source_root)]
+    evidence: list[str] = [_relative(core, evidence_root)]
     score = 6
 
     system_json = game_root / "data" / "System.json"
     if system_json.is_file():
         score += 3
-        evidence.append(_relative(system_json, source_root))
+        evidence.append(_relative(system_json, evidence_root))
 
     index_html = game_root / "index.html"
     if index_html.is_file():
         score += 1
-        evidence.append(_relative(index_html, source_root))
+        evidence.append(_relative(index_html, evidence_root))
 
     package_candidates = (source_root / "package.json", game_root / "package.json")
     package = next((p for p in package_candidates if p.is_file()), None)
     if package is not None:
         score += 1
-        evidence.append(_relative(package, source_root))
+        evidence.append(_relative(package, evidence_root))
 
     return _Candidate(
         engine=engine,
+        source_root=source_root,
         game_root=game_root,
         core_file=core,
         score=score,
@@ -101,50 +104,71 @@ def _score_candidate(
     )
 
 
-def _collect_candidates(root: Path) -> list[_Candidate]:
+def _collect_candidates(source_root: Path, *, evidence_root: Path) -> list[_Candidate]:
     candidates: list[_Candidate] = []
 
-    # Normal Windows MV deployment: <root>/www/js/rpg_core.js.
     mv_www = _score_candidate(
-        root,
+        evidence_root,
+        source_root,
         engine=EngineVariant.MV,
-        game_root=root / "www",
+        game_root=source_root / "www",
         core_name="rpg_core.js",
     )
     if mv_www:
         candidates.append(mv_www)
 
-    # Web exports, already-normalized layouts, and manually selected payload roots.
     mv_root = _score_candidate(
-        root,
+        evidence_root,
+        source_root,
         engine=EngineVariant.MV,
-        game_root=root,
+        game_root=source_root,
         core_name="rpg_core.js",
     )
     if mv_root:
         candidates.append(mv_root)
 
-    # Normal MZ deployment is rooted directly beside package.json.
     mz_root = _score_candidate(
-        root,
+        evidence_root,
+        source_root,
         engine=EngineVariant.MZ,
-        game_root=root,
+        game_root=source_root,
         core_name="rmmz_core.js",
     )
     if mz_root:
         candidates.append(mz_root)
 
-    # Also accept an MZ payload that has already been nested under www/.
     mz_www = _score_candidate(
-        root,
+        evidence_root,
+        source_root,
         engine=EngineVariant.MZ,
-        game_root=root / "www",
+        game_root=source_root / "www",
         core_name="rmmz_core.js",
     )
     if mz_www:
         candidates.append(mz_www)
 
     return candidates
+
+
+def _single_wrapper_child(root: Path) -> Path | None:
+    """
+    Return a single obvious wrapper directory, if present.
+
+    Extracted archives commonly contain one top-level folder around the actual
+    game. Hidden metadata directories such as __MACOSX are ignored.
+    """
+    try:
+        children = [
+            child
+            for child in root.iterdir()
+            if child.is_dir()
+            and not child.name.startswith(".")
+            and child.name != "__MACOSX"
+        ]
+    except OSError:
+        return None
+
+    return children[0] if len(children) == 1 else None
 
 
 def _find_package_json(source_root: Path, game_root: Path) -> Path | None:
@@ -197,6 +221,8 @@ def inspect_game(path: Path | str) -> GameInspection:
     Detect RPG Maker MV/MZ using engine-specific JavaScript runtime files.
 
     Generic markers such as package.json are never sufficient on their own.
+    If the selected directory contains one obvious wrapper directory, that
+    directory is inspected automatically as a convenience for extracted ZIPs.
     """
     root = _normalize_path(path)
 
@@ -211,7 +237,13 @@ def inspect_game(path: Path | str) -> GameInspection:
             warnings=[f"Path is not a directory: {root}"],
         )
 
-    candidates = _collect_candidates(root)
+    candidates = _collect_candidates(root, evidence_root=root)
+    wrapper: Path | None = None
+    if not candidates:
+        wrapper = _single_wrapper_child(root)
+        if wrapper is not None:
+            candidates = _collect_candidates(wrapper, evidence_root=root)
+
     if not candidates:
         return GameInspection(
             source_path=root,
@@ -237,8 +269,12 @@ def inspect_game(path: Path | str) -> GameInspection:
                 ],
             )
 
-    package_json = _find_package_json(root, best.game_root)
+    package_json = _find_package_json(best.source_root, best.game_root)
     warnings: list[str] = []
+    if wrapper is not None:
+        warnings.append(
+            f"Auto-descended into wrapper directory: {_relative(wrapper, root)}"
+        )
     if not (best.game_root / "data" / "System.json").is_file():
         warnings.append(
             "Engine core found, but data/System.json is missing; "
@@ -251,7 +287,7 @@ def inspect_game(path: Path | str) -> GameInspection:
         runtime="nwjs",
         confidence=_confidence_for_score(best.score),
         game_root=best.game_root,
-        game_name=_detect_game_name(best.game_root, package_json) or root.name,
+        game_name=_detect_game_name(best.game_root, package_json) or best.source_root.name,
         engine_version=_detect_engine_version(best.core_file),
         package_json=package_json,
         evidence=list(best.evidence),
