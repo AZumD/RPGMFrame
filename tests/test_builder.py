@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -146,3 +147,41 @@ def test_build_can_resolve_runtime_automatically(tmp_path: Path) -> None:
     assert manager.requested == "0.117.0"
     assert messages == ["fake runtime resolved"]
     assert result.runtime_path == runtime
+
+
+def test_builds_directly_from_zip_input(tmp_path: Path) -> None:
+    source_tree = _mv_game(tmp_path / "zip-source")
+    runtime = _runtime(tmp_path / "nwjs")
+    archive = tmp_path / "jailbreak.zip"
+
+    with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as zipped:
+        for path in source_tree.rglob("*"):
+            if path.is_file():
+                zipped.write(path, path.relative_to(source_tree))
+
+    output = tmp_path / "jailbreak-frame"
+    messages: list[str] = []
+    result = build_game(
+        archive,
+        runtime=runtime,
+        output=output,
+        progress=messages.append,
+    )
+
+    assert result.success
+    assert result.source_path == archive
+    assert (output / "www/js/rpg_core.js").is_file()
+    assert (output / "launch.sh").is_file()
+    assert any("Extracted ZIP input" in message for message in messages)
+    assert any("ZIP input" in warning for warning in result.warnings)
+
+    package = json.loads((output / "package.json").read_text(encoding="utf-8"))
+    assert package["name"] == "rpgmframe-jailbreak"
+
+
+def test_default_zip_output_drops_zip_suffix(tmp_path: Path) -> None:
+    archive = tmp_path / "game.zip"
+
+    from rpgmframe.builder import default_output_path
+
+    assert default_output_path(archive) == tmp_path / "game-frame"

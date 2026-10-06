@@ -12,6 +12,8 @@ RPGMFrame can:
 - report engine, confidence, evidence, title, payload root, and RPG Maker version
 - auto-descend through a single extracted archive wrapper directory
 - build **RPG Maker MV** games around Linux ARM64 NW.js
+- build directly from `.zip` downloads without manual extraction
+- optionally package completed builds as portable `.tar.gz` archives
 - automatically download, SHA256-verify, and cache the pinned NW.js ARM64 runtime
 - accept a manually supplied NW.js runtime as an override
 - validate that the NW.js `nw` binary is actually AArch64
@@ -42,10 +44,31 @@ rpgmframe inspect /path/to/game --json
 
 ## Build MV
 
-Normal use now needs only the game:
+Normal use now needs only the game directory:
 
 ```bash
 rpgmframe build /path/to/mv-game
+```
+
+ZIP downloads can be passed directly:
+
+```bash
+rpgmframe build /path/to/game.zip
+```
+
+RPGMFrame safely extracts ZIP input into a temporary workspace, builds from it, and removes the temporary files afterwards.
+
+To also create a transfer-ready archive:
+
+```bash
+rpgmframe build /path/to/game.zip --archive
+```
+
+With the default output naming, that produces both:
+
+```text
+game-frame/
+game-linux-aarch64.tar.gz
 ```
 
 On the first build, RPGMFrame downloads the official Linux ARM64 NW.js tarball and `SHASUMS256.txt`, verifies the archive, and caches the extracted runtime under `~/.cache/rpgmframe/runtimes/nwjs/`. Later builds reuse that cache.
@@ -63,7 +86,7 @@ rpgmframe build /path/to/mv-game \
   --runtime /path/to/nwjs-v0.117.0-linux-arm64
 ```
 
-The default output is `<source>-frame/`. Use `-o` to choose another directory and `--force` to replace an existing output.
+The default output is `<source>-frame/` (with `.zip` removed for archive input). Use `-o` to choose another directory and `--force` to replace an existing output or packaged archive.
 
 Launch the built game on the Frame with:
 

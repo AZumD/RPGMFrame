@@ -9,6 +9,7 @@ from pathlib import Path
 
 from rpgmframe.builder import BuildError, build_game
 from rpgmframe.detector import inspect_game
+from rpgmframe.packaging import PackagingError, create_tar_gz
 from rpgmframe.runtime import DEFAULT_NWJS_VERSION
 
 
@@ -34,7 +35,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "build",
         help="Build a Linux ARM64 package, downloading NW.js when needed.",
     )
-    build_parser.add_argument("path", type=Path, help="RPG Maker game directory")
+    build_parser.add_argument("path", type=Path, help="RPG Maker game directory or .zip archive")
     build_parser.add_argument(
         "--runtime",
         type=Path,
@@ -57,7 +58,12 @@ def _build_parser() -> argparse.ArgumentParser:
     build_parser.add_argument(
         "--force",
         action="store_true",
-        help="Replace an existing output directory",
+        help="Replace an existing output directory/archive",
+    )
+    build_parser.add_argument(
+        "--archive",
+        action="store_true",
+        help="Also create a portable Linux ARM64 .tar.gz beside the build",
     )
 
     return parser
@@ -89,7 +95,7 @@ def _print_inspection(result) -> None:
             print(f"  - {item}")
 
 
-def _print_build(result) -> None:
+def _print_build(result, archive_path: Path | None = None) -> None:
     print(f"Built:         {result.output_path}")
     print(f"Engine:        {result.engine.value}")
     if result.engine_version:
@@ -97,6 +103,8 @@ def _print_build(result) -> None:
     print(f"Runtime:       {result.runtime_path}")
     print(f"Runtime arch:  {result.runtime_architecture}")
     print(f"Launcher:      {result.launcher_path}")
+    if archive_path:
+        print(f"Archive:       {archive_path}")
     if result.game_name:
         print(f"Game name:     {result.game_name}")
     if result.warnings:
@@ -126,10 +134,15 @@ def main(argv: list[str] | None = None) -> int:
                 force=args.force,
                 progress=lambda message: print(message, file=sys.stderr),
             )
-        except BuildError as exc:
+            archive_path = (
+                create_tar_gz(result.output_path, force=args.force)
+                if args.archive
+                else None
+            )
+        except (BuildError, PackagingError) as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 2
-        _print_build(result)
+        _print_build(result, archive_path)
         return 0
 
     return 2

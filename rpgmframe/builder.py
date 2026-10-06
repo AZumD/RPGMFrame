@@ -15,6 +15,7 @@ from rpgmframe.detector import inspect_game
 from rpgmframe.elf import read_elf_architecture
 from rpgmframe.models import BuildResult, EngineVariant
 from rpgmframe.runtime import DEFAULT_NWJS_VERSION, RuntimeManager
+from rpgmframe.source import SourceError, prepare_source
 
 
 class BuildError(RuntimeError):
@@ -30,7 +31,8 @@ def _normalize_path(path: Path | str) -> Path:
 
 def default_output_path(source: Path | str) -> Path:
     source_path = _normalize_path(source)
-    return source_path.parent / f"{source_path.name}-frame"
+    name = source_path.stem if source_path.suffix.lower() == ".zip" else source_path.name
+    return source_path.parent / f"{name}-frame"
 
 
 def _paths_overlap(a: Path, b: Path) -> bool:
@@ -43,8 +45,9 @@ def _ignore_junk(directory: str, contents: list[str]) -> list[str]:
 
 
 def _package_slug(source: Path) -> str:
+    source_name = source.stem if source.suffix.lower() == ".zip" else source.name
     ascii_name = (
-        unicodedata.normalize("NFKD", source.name)
+        unicodedata.normalize("NFKD", source_name)
         .encode("ascii", "ignore")
         .decode("ascii")
         .lower()
@@ -205,111 +208,124 @@ def build_game(
         _normalize_path(output) if output is not None else default_output_path(source_path)
     )
 
-    if not source_path.is_dir():
-        raise BuildError(f"Source path is not a directory: {source_path}")
-
-    inspection = inspect_game(source_path)
-    if not inspection.recognized:
-        detail = "; ".join(inspection.warnings) or "unrecognized game"
-        raise BuildError(f"Could not identify RPG Maker game: {detail}")
-    if inspection.engine is not EngineVariant.MV:
-        raise BuildError(
-            f"Building RPG Maker {inspection.engine.value.upper()} is not enabled yet. "
-            "MV is the first hardware-validated backend."
-        )
-    if inspection.game_root is None:
-        raise BuildError("Detected MV game has no payload root")
-    if not (inspection.game_root / "index.html").is_file():
-        raise BuildError(
-            f"MV payload is missing index.html: {inspection.game_root / 'index.html'}"
-        )
-
-    if runtime is None:
-        manager = runtime_manager or RuntimeManager()
-        try:
-            runtime_path = manager.ensure_nwjs(runtime_version, progress=progress)
-        except Exception as exc:
-            raise BuildError(f"Could not resolve NW.js runtime: {exc}") from exc
-    else:
-        runtime_path = _normalize_path(runtime)
-        if not runtime_path.is_dir():
-            raise BuildError(f"Runtime path is not a directory: {runtime_path}")
-        if progress:
-            progress(f"Using supplied NW.js runtime: {runtime_path}")
-
-    architecture = _validate_runtime(runtime_path)
-    _validate_paths(source_path, runtime_path, output_path)
-
-    if output_path.exists() and not force:
-        raise BuildError(f"Output already exists: {output_path}. Pass --force to replace it.")
-
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    staging = _staging_path(output_path)
-    if staging.exists():
-        shutil.rmtree(staging, ignore_errors=True)
-
-    warnings = list(inspection.warnings)
-    warnings.append(
-        "MV is being run on a modern ARM64 NW.js runtime rather than its original "
-        "bundled runtime; test game-specific plugins and media."
-    )
+    try:
+        prepared_context = prepare_source(source_path)
+        prepared = prepared_context.__enter__()
+    except SourceError as exc:
+        raise BuildError(str(exc)) from exc
 
     try:
-        shutil.copytree(
-            runtime_path,
-            staging,
-            symlinks=True,
-            ignore=_ignore_junk,
-            ignore_dangling_symlinks=True,
-        )
+        if progress and prepared.archive_type:
+            progress(f"Extracted {prepared.archive_type.upper()} input: {source_path.name}")
 
-        payload_destination = staging / "www"
-        if payload_destination.exists():
-            if payload_destination.is_dir():
-                shutil.rmtree(payload_destination)
-            else:
-                payload_destination.unlink()
+        inspection = inspect_game(prepared.root)
+        if not inspection.recognized:
+            detail = "; ".join(inspection.warnings) or "unrecognized game"
+            raise BuildError(f"Could not identify RPG Maker game: {detail}")
+        if inspection.engine is not EngineVariant.MV:
+            raise BuildError(
+                f"Building RPG Maker {inspection.engine.value.upper()} is not enabled yet. "
+                "MV is the first hardware-validated backend."
+            )
+        if inspection.game_root is None:
+            raise BuildError("Detected MV game has no payload root")
+        if not (inspection.game_root / "index.html").is_file():
+            raise BuildError(
+                f"MV payload is missing index.html: {inspection.game_root / 'index.html'}"
+            )
 
-        shutil.copytree(
-            inspection.game_root,
-            payload_destination,
-            symlinks=True,
-            ignore=_ignore_junk,
-            ignore_dangling_symlinks=True,
-        )
+        if runtime is None:
+            manager = runtime_manager or RuntimeManager()
+            try:
+                runtime_path = manager.ensure_nwjs(runtime_version, progress=progress)
+            except Exception as exc:
+                raise BuildError(f"Could not resolve NW.js runtime: {exc}") from exc
+        else:
+            runtime_path = _normalize_path(runtime)
+            if not runtime_path.is_dir():
+                raise BuildError(f"Runtime path is not a directory: {runtime_path}")
+            if progress:
+                progress(f"Using supplied NW.js runtime: {runtime_path}")
 
-        _write_package(
-            staging / "package.json",
-            inspection.package_json,
-            source_path,
-        )
+        architecture = _validate_runtime(runtime_path)
+        _validate_paths(source_path, runtime_path, output_path)
 
-        nw_output = staging / "nw"
-        nw_output.chmod(nw_output.stat().st_mode | 0o755)
-        crashpad = staging / "chrome_crashpad_handler"
-        if crashpad.is_file():
-            crashpad.chmod(crashpad.stat().st_mode | 0o755)
+        if output_path.exists() and not force:
+            raise BuildError(
+                f"Output already exists: {output_path}. Pass --force to replace it."
+            )
 
-        launcher = _write_launcher(staging)
-        _install_staging(staging, output_path, force=force)
-    except BuildError:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        staging = _staging_path(output_path)
         if staging.exists():
             shutil.rmtree(staging, ignore_errors=True)
-        raise
-    except Exception as exc:
-        if staging.exists():
-            shutil.rmtree(staging, ignore_errors=True)
-        raise BuildError(f"Build failed: {exc}") from exc
 
-    return BuildResult(
-        success=True,
-        source_path=source_path,
-        output_path=output_path,
-        runtime_path=runtime_path,
-        launcher_path=output_path / launcher.name,
-        engine=inspection.engine,
-        engine_version=inspection.engine_version,
-        game_name=inspection.game_name,
-        runtime_architecture=architecture,
-        warnings=warnings,
-    )
+        warnings = list(inspection.warnings)
+        if prepared.archive_type:
+            warnings.insert(0, f"Built directly from {prepared.archive_type.upper()} input")
+        warnings.append(
+            "MV is being run on a modern ARM64 NW.js runtime rather than its original "
+            "bundled runtime; test game-specific plugins and media."
+        )
+
+        try:
+            shutil.copytree(
+                runtime_path,
+                staging,
+                symlinks=True,
+                ignore=_ignore_junk,
+                ignore_dangling_symlinks=True,
+            )
+
+            payload_destination = staging / "www"
+            if payload_destination.exists():
+                if payload_destination.is_dir():
+                    shutil.rmtree(payload_destination)
+                else:
+                    payload_destination.unlink()
+
+            shutil.copytree(
+                inspection.game_root,
+                payload_destination,
+                symlinks=True,
+                ignore=_ignore_junk,
+                ignore_dangling_symlinks=True,
+            )
+
+            _write_package(
+                staging / "package.json",
+                inspection.package_json,
+                source_path,
+            )
+
+            nw_output = staging / "nw"
+            nw_output.chmod(nw_output.stat().st_mode | 0o755)
+            crashpad = staging / "chrome_crashpad_handler"
+            if crashpad.is_file():
+                crashpad.chmod(crashpad.stat().st_mode | 0o755)
+
+            launcher = _write_launcher(staging)
+            _install_staging(staging, output_path, force=force)
+        except BuildError:
+            if staging.exists():
+                shutil.rmtree(staging, ignore_errors=True)
+            raise
+        except Exception as exc:
+            if staging.exists():
+                shutil.rmtree(staging, ignore_errors=True)
+            raise BuildError(f"Build failed: {exc}") from exc
+
+        return BuildResult(
+            success=True,
+            source_path=source_path,
+            output_path=output_path,
+            runtime_path=runtime_path,
+            launcher_path=output_path / launcher.name,
+            engine=inspection.engine,
+            engine_version=inspection.engine_version,
+            game_name=inspection.game_name,
+            runtime_architecture=architecture,
+            warnings=warnings,
+        )
+    finally:
+        prepared_context.__exit__(None, None, None)
