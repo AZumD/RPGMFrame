@@ -24,6 +24,7 @@ RPGMFrame can:
 - preserve game-owned package-root companion files while dropping the old Windows NW.js runtime
 - inject a generic case-insensitive Linux path compatibility shim for browser assets and Node fs reads
 - repair a missing MV fpsmeter.js include when the core requires it and the shipped library is present
+- provide a RenFrame-style desktop GUI with drag/drop, inspection, conversion progress, and transfer packaging
 
 The MV runtime-swap path has been validated on Steam Frame hardware with an RPG Maker MV 1.6.1 game.
 
@@ -41,6 +42,43 @@ source .venv/bin/activate
 pip install -e ".[dev]"
 pytest
 ```
+
+
+## Desktop GUI
+
+RPGMFrame now includes a lightweight desktop frontend modeled after RenFrame's
+GUI: dark CustomTkinter UI, optional drag-and-drop, automatic game inspection,
+conversion progress, output controls, and a transfer archive enabled by default.
+
+Run it from source:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -e ".[gui]"
+rpgmframe-gui
+```
+
+Or:
+
+```bash
+python app/main.py
+```
+
+The GUI displays the detected RPG Maker engine/version and compatibility result,
+then uses the same tested builder and packaging code as the CLI. It does not
+maintain a separate conversion implementation.
+
+Native packaging scripts are included for both platforms:
+
+| Target | Script |
+| --- | --- |
+| Windows x64 | `powershell -File build/build_windows.ps1` |
+| Linux aarch64 / Steam Frame | `bash build/build_linux_aarch64.sh` |
+
+Windows GUI packaging is scaffolded to match RenFrame, but the native-Windows
+conversion path still needs broad real-game validation. Linux/WSL and Steam
+Frame are the currently proven development/runtime paths.
 
 ## Inspect
 

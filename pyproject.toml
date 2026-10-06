@@ -17,9 +17,17 @@ dependencies = []
 dev = [
   "pytest>=8",
 ]
+gui = [
+  "customtkinter>=5.2.2",
+  "tkinterdnd2>=0.4.2",
+]
+build = [
+  "pyinstaller>=6.3.0",
+]
 
 [project.scripts]
 rpgmframe = "rpgmframe.cli:main"
+rpgmframe-gui = "rpgmframe.gui:main"
 
 [tool.setuptools.packages.find]
 include = ["rpgmframe*"]
