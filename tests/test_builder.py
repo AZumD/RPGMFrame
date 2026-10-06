@@ -114,3 +114,35 @@ def test_force_replaces_existing_output(tmp_path: Path) -> None:
 
     assert not (output / "old.txt").exists()
     assert (output / "www/index.html").is_file()
+
+
+def test_build_can_resolve_runtime_automatically(tmp_path: Path) -> None:
+    source = _mv_game(tmp_path / "source")
+    runtime = _runtime(tmp_path / "nwjs")
+    output = tmp_path / "built"
+
+    class FakeRuntimeManager:
+        def __init__(self) -> None:
+            self.requested: str | None = None
+
+        def ensure_nwjs(self, version: str, *, progress=None) -> Path:
+            self.requested = version
+            if progress:
+                progress("fake runtime resolved")
+            return runtime
+
+    manager = FakeRuntimeManager()
+    messages: list[str] = []
+
+    result = build_game(
+        source,
+        runtime_manager=manager,
+        runtime_version="0.117.0",
+        output=output,
+        progress=messages.append,
+    )
+
+    assert result.success
+    assert manager.requested == "0.117.0"
+    assert messages == ["fake runtime resolved"]
+    assert result.runtime_path == runtime

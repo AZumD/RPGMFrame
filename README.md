@@ -11,8 +11,10 @@ RPGMFrame can:
 - detect RPG Maker MV and MZ game directories
 - report engine, confidence, evidence, title, payload root, and RPG Maker version
 - auto-descend through a single extracted archive wrapper directory
-- build **RPG Maker MV** games around a user-supplied Linux ARM64 NW.js runtime
-- validate that the supplied NW.js `nw` binary is actually AArch64
+- build **RPG Maker MV** games around Linux ARM64 NW.js
+- automatically download, SHA256-verify, and cache the pinned NW.js ARM64 runtime
+- accept a manually supplied NW.js runtime as an override
+- validate that the NW.js `nw` binary is actually AArch64
 - repair an empty NW.js package name while preserving game-specific package settings
 - generate a launcher that discovers a running FrameTop Plasma/Xwayland environment
 
@@ -20,27 +22,13 @@ The MV runtime-swap path has been validated on Steam Frame hardware with an RPG 
 
 MZ is detectable but its build path is intentionally gated until the same transplant has been validated on real hardware.
 
-Later targets:
-
-- automatic NW.js download, checksum verification, and caching
-- MZ build support after hardware validation
-- RPG Maker XP/VX/VX Ace through mkxp-z
-- RPG Maker 2000/2003 through EasyRPG Player
+The default runtime is pinned to **NW.js 0.117.0**, the version currently validated on Steam Frame. Use `--runtime-version` to test another official release or `--runtime` to supply an extracted runtime directly.
 
 ## Development
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-pip install -e ".[dev]"
-pytest
-```
-
-On Windows PowerShell:
-
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
 pip install -e ".[dev]"
 pytest
 ```
@@ -54,7 +42,21 @@ rpgmframe inspect /path/to/game --json
 
 ## Build MV
 
-Pass an extracted Linux ARM64 NW.js runtime:
+Normal use now needs only the game:
+
+```bash
+rpgmframe build /path/to/mv-game
+```
+
+On the first build, RPGMFrame downloads the official Linux ARM64 NW.js tarball and `SHASUMS256.txt`, verifies the archive, and caches the extracted runtime under `~/.cache/rpgmframe/runtimes/nwjs/`. Later builds reuse that cache.
+
+Override the pinned runtime version:
+
+```bash
+rpgmframe build /path/to/mv-game --runtime-version 0.117.0
+```
+
+Or supply an already extracted runtime:
 
 ```bash
 rpgmframe build /path/to/mv-game \

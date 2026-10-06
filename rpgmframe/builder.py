@@ -7,12 +7,14 @@ import re
 import shutil
 import unicodedata
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 from rpgmframe.detector import inspect_game
 from rpgmframe.elf import read_elf_architecture
 from rpgmframe.models import BuildResult, EngineVariant
+from rpgmframe.runtime import DEFAULT_NWJS_VERSION, RuntimeManager
 
 
 class BuildError(RuntimeError):
@@ -190,27 +192,21 @@ def _install_staging(staging: Path, output: Path, *, force: bool) -> None:
 def build_game(
     source: Path | str,
     *,
-    runtime: Path | str,
+    runtime: Path | str | None = None,
+    runtime_version: str = DEFAULT_NWJS_VERSION,
+    runtime_manager: RuntimeManager | None = None,
     output: Path | str | None = None,
     force: bool = False,
+    progress: Callable[[str], None] | None = None,
 ) -> BuildResult:
-    """
-    Create a self-contained Linux ARM64 NW.js directory for an RPG Maker MV game.
-
-    This deliberately implements only the MV path already validated on Steam
-    Frame hardware. MZ detection exists, but MZ builds remain gated until the
-    equivalent runtime transplant has been tested.
-    """
+    """Create a self-contained Linux ARM64 NW.js directory for an RPG Maker MV game."""
     source_path = _normalize_path(source)
-    runtime_path = _normalize_path(runtime)
     output_path = (
         _normalize_path(output) if output is not None else default_output_path(source_path)
     )
 
     if not source_path.is_dir():
         raise BuildError(f"Source path is not a directory: {source_path}")
-    if not runtime_path.is_dir():
-        raise BuildError(f"Runtime path is not a directory: {runtime_path}")
 
     inspection = inspect_game(source_path)
     if not inspection.recognized:
@@ -227,6 +223,19 @@ def build_game(
         raise BuildError(
             f"MV payload is missing index.html: {inspection.game_root / 'index.html'}"
         )
+
+    if runtime is None:
+        manager = runtime_manager or RuntimeManager()
+        try:
+            runtime_path = manager.ensure_nwjs(runtime_version, progress=progress)
+        except Exception as exc:
+            raise BuildError(f"Could not resolve NW.js runtime: {exc}") from exc
+    else:
+        runtime_path = _normalize_path(runtime)
+        if not runtime_path.is_dir():
+            raise BuildError(f"Runtime path is not a directory: {runtime_path}")
+        if progress:
+            progress(f"Using supplied NW.js runtime: {runtime_path}")
 
     architecture = _validate_runtime(runtime_path)
     _validate_paths(source_path, runtime_path, output_path)

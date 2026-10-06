@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 from rpgmframe.builder import BuildError, build_game
 from rpgmframe.detector import inspect_game
+from rpgmframe.runtime import DEFAULT_NWJS_VERSION
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -30,14 +32,21 @@ def _build_parser() -> argparse.ArgumentParser:
 
     build_parser = subparsers.add_parser(
         "build",
-        help="Build a Linux ARM64 package using a supplied NW.js runtime.",
+        help="Build a Linux ARM64 package, downloading NW.js when needed.",
     )
     build_parser.add_argument("path", type=Path, help="RPG Maker game directory")
     build_parser.add_argument(
         "--runtime",
-        required=True,
         type=Path,
-        help="Extracted Linux ARM64 NW.js runtime directory",
+        help="Use this extracted Linux ARM64 NW.js runtime instead of the cache",
+    )
+    build_parser.add_argument(
+        "--runtime-version",
+        default=DEFAULT_NWJS_VERSION,
+        help=(
+            "NW.js version to download/use when --runtime is omitted "
+            f"(default: {DEFAULT_NWJS_VERSION})"
+        ),
     )
     build_parser.add_argument(
         "-o",
@@ -85,6 +94,7 @@ def _print_build(result) -> None:
     print(f"Engine:        {result.engine.value}")
     if result.engine_version:
         print(f"Engine version: {result.engine_version}")
+    print(f"Runtime:       {result.runtime_path}")
     print(f"Runtime arch:  {result.runtime_architecture}")
     print(f"Launcher:      {result.launcher_path}")
     if result.game_name:
@@ -111,11 +121,13 @@ def main(argv: list[str] | None = None) -> int:
             result = build_game(
                 args.path,
                 runtime=args.runtime,
+                runtime_version=args.runtime_version,
                 output=args.output,
                 force=args.force,
+                progress=lambda message: print(message, file=sys.stderr),
             )
         except BuildError as exc:
-            print(f"error: {exc}")
+            print(f"error: {exc}", file=sys.stderr)
             return 2
         _print_build(result)
         return 0
