@@ -1,0 +1,116 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+
+from rpgmframe.builder import BuildError, build_game
+
+
+def _write(path: Path, content: str = "") -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+
+
+def _write_elf(path: Path, machine: int) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    header = bytearray(64)
+    header[:4] = b"\x7fELF"
+    header[4] = 2
+    header[5] = 1
+    header[6] = 1
+    header[18:20] = machine.to_bytes(2, "little")
+    path.write_bytes(header)
+
+
+def _mv_game(root: Path) -> Path:
+    wrapper = root / "jailbreak_win"
+    _write(
+        wrapper / "www/js/rpg_core.js",
+        'Utils.RPGMAKER_VERSION = "1.6.1";\n',
+    )
+    _write(wrapper / "www/data/System.json", json.dumps({"gameTitle": "Test MV"}))
+    _write(wrapper / "www/index.html", "<html>mv</html>")
+    _write(wrapper / "www/js/plugins.js", "var $plugins = [];")
+    _write(
+        wrapper / "package.json",
+        json.dumps(
+            {
+                "name": "",
+                "main": "www/index.html",
+                "js-flags": "--expose-gc",
+                "window": {"width": 816, "height": 624},
+            }
+        ),
+    )
+    return root
+
+
+def _runtime(root: Path, machine: int = 183) -> Path:
+    _write_elf(root / "nw", machine)
+    _write_elf(root / "chrome_crashpad_handler", machine)
+    _write(root / "resources.pak", "runtime")
+    return root
+
+
+def test_builds_mv_with_arm64_nwjs(tmp_path: Path) -> None:
+    source = _mv_game(tmp_path / "source")
+    runtime = _runtime(tmp_path / "nwjs")
+    output = tmp_path / "built"
+
+    result = build_game(source, runtime=runtime, output=output)
+
+    assert result.success
+    assert result.runtime_architecture == "aarch64"
+    assert (output / "nw").is_file()
+    assert (output / "resources.pak").is_file()
+    assert (output / "www/js/rpg_core.js").is_file()
+    assert (output / "www/data/System.json").is_file()
+    assert (output / "launch.sh").is_file()
+
+    package = json.loads((output / "package.json").read_text(encoding="utf-8"))
+    assert package["name"] == "rpgmframe-source"
+    assert package["main"] == "www/index.html"
+    assert package["js-flags"] == "--expose-gc"
+    assert package["window"]["width"] == 816
+
+    launcher = (output / "launch.sh").read_text(encoding="utf-8")
+    assert "plasmashell" in launcher
+    assert "XAUTHORITY" in launcher
+    assert 'exec "$ROOT/nw" "$ROOT" "$@"' in launcher
+
+
+def test_rejects_x86_64_runtime(tmp_path: Path) -> None:
+    source = _mv_game(tmp_path / "source")
+    runtime = _runtime(tmp_path / "nwjs", machine=62)
+
+    with pytest.raises(BuildError, match="x86_64, not aarch64"):
+        build_game(source, runtime=runtime, output=tmp_path / "built")
+
+
+def test_refuses_mz_build_until_validated(tmp_path: Path) -> None:
+    source = tmp_path / "mz"
+    _write(source / "js/rmmz_core.js", 'Utils.RPGMAKER_VERSION = "1.9.0";')
+    _write(source / "data/System.json", json.dumps({"gameTitle": "Test MZ"}))
+    _write(source / "index.html", "<html>mz</html>")
+    runtime = _runtime(tmp_path / "nwjs")
+
+    with pytest.raises(BuildError, match="MZ.*not enabled"):
+        build_game(source, runtime=runtime, output=tmp_path / "built")
+
+
+def test_force_replaces_existing_output(tmp_path: Path) -> None:
+    source = _mv_game(tmp_path / "source")
+    runtime = _runtime(tmp_path / "nwjs")
+    output = tmp_path / "built"
+    output.mkdir()
+    _write(output / "old.txt", "old")
+
+    with pytest.raises(BuildError, match="already exists"):
+        build_game(source, runtime=runtime, output=output)
+
+    build_game(source, runtime=runtime, output=output, force=True)
+
+    assert not (output / "old.txt").exists()
+    assert (output / "www/index.html").is_file()

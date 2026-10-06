@@ -1,0 +1,306 @@
+"""Build a Linux ARM64 RPG Maker MV package around an NW.js runtime."""
+
+from __future__ import annotations
+
+import json
+import re
+import shutil
+import unicodedata
+import uuid
+from pathlib import Path
+from typing import Any
+
+from rpgmframe.detector import inspect_game
+from rpgmframe.elf import read_elf_architecture
+from rpgmframe.models import BuildResult, EngineVariant
+
+
+class BuildError(RuntimeError):
+    """Raised when an RPGMFrame build cannot proceed safely."""
+
+
+_IGNORE_NAMES = frozenset({".git", "__pycache__", ".DS_Store"})
+
+
+def _normalize_path(path: Path | str) -> Path:
+    return Path(path).expanduser().resolve()
+
+
+def default_output_path(source: Path | str) -> Path:
+    source_path = _normalize_path(source)
+    return source_path.parent / f"{source_path.name}-frame"
+
+
+def _paths_overlap(a: Path, b: Path) -> bool:
+    return a == b or a in b.parents or b in a.parents
+
+
+def _ignore_junk(directory: str, contents: list[str]) -> list[str]:
+    del directory
+    return [name for name in contents if name in _IGNORE_NAMES or name.endswith(".pyc")]
+
+
+def _package_slug(source: Path) -> str:
+    ascii_name = (
+        unicodedata.normalize("NFKD", source.name)
+        .encode("ascii", "ignore")
+        .decode("ascii")
+        .lower()
+    )
+    ascii_name = re.sub(r"[^a-z0-9._-]+", "-", ascii_name).strip("-._")
+    return f"rpgmframe-{ascii_name or 'game'}"
+
+
+def _load_package(path: Path | None) -> dict[str, Any]:
+    if path is None:
+        return {}
+    try:
+        value = json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise BuildError(f"Could not read package.json: {path}: {exc}") from exc
+    if not isinstance(value, dict):
+        raise BuildError(f"package.json is not a JSON object: {path}")
+    return value
+
+
+def _write_package(
+    destination: Path,
+    source_package: Path | None,
+    source_path: Path,
+) -> None:
+    package = _load_package(source_package)
+    if not isinstance(package.get("name"), str) or not package["name"].strip():
+        package["name"] = _package_slug(source_path)
+
+    package["main"] = "www/index.html"
+
+    destination.write_text(
+        json.dumps(package, ensure_ascii=False, indent=4) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _launcher_body() -> str:
+    return r'''#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+import_graphics_env() {
+    local pid="$1"
+    local key value
+    while IFS='=' read -r key value; do
+        case "$key" in
+            DISPLAY|WAYLAND_DISPLAY|XDG_RUNTIME_DIR|XAUTHORITY)
+                export "$key=$value"
+                ;;
+        esac
+    done < <(tr '\0' '\n' < "/proc/$pid/environ")
+}
+
+if command -v pgrep >/dev/null 2>&1; then
+    plasma_pid="$(pgrep -n plasmashell || true)"
+    if [[ -n "$plasma_pid" && -r "/proc/$plasma_pid/environ" ]]; then
+        plasma_runtime="$(
+            tr '\0' '\n' < "/proc/$plasma_pid/environ" |
+                sed -n 's/^XDG_RUNTIME_DIR=//p' |
+                tail -n 1
+        )"
+        plasma_xauth="$(
+            tr '\0' '\n' < "/proc/$plasma_pid/environ" |
+                sed -n 's/^XAUTHORITY=//p' |
+                tail -n 1
+        )"
+
+        if [[ "$plasma_runtime" == */frametop || "$plasma_xauth" == */frametop/* ]]; then
+            import_graphics_env "$plasma_pid"
+        elif [[ -z "${DISPLAY:-}" && -z "${WAYLAND_DISPLAY:-}" ]]; then
+            import_graphics_env "$plasma_pid"
+        fi
+    fi
+fi
+
+if [[ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ]]; then
+    user_bus="/run/user/$(id -u)/bus"
+    if [[ -S "$user_bus" ]]; then
+        export DBUS_SESSION_BUS_ADDRESS="unix:path=$user_bus"
+    fi
+fi
+
+exec "$ROOT/nw" "$ROOT" "$@"
+'''
+
+
+def _write_launcher(root: Path) -> Path:
+    launcher = root / "launch.sh"
+    launcher.write_text(_launcher_body(), encoding="utf-8", newline="\n")
+    launcher.chmod(launcher.stat().st_mode | 0o755)
+    return launcher
+
+
+def _validate_runtime(runtime: Path) -> str:
+    nw = runtime / "nw"
+    if not nw.is_file():
+        raise BuildError(f"NW.js runtime is missing its nw executable: {nw}")
+
+    architecture = read_elf_architecture(nw)
+    if architecture is None:
+        raise BuildError(f"NW.js nw binary is not a readable ELF executable: {nw}")
+    if architecture != "aarch64":
+        raise BuildError(
+            f"NW.js runtime architecture is {architecture}, not aarch64: {nw}"
+        )
+    return architecture
+
+
+def _validate_paths(source: Path, runtime: Path, output: Path) -> None:
+    if _paths_overlap(source, output):
+        raise BuildError(
+            f"Output path must not overlap the source: source={source}, output={output}"
+        )
+    if _paths_overlap(runtime, output):
+        raise BuildError(
+            f"Output path must not overlap the runtime: runtime={runtime}, output={output}"
+        )
+
+
+def _staging_path(output: Path) -> Path:
+    return output.parent / f".{output.name}.tmp-{uuid.uuid4().hex[:8]}"
+
+
+def _install_staging(staging: Path, output: Path, *, force: bool) -> None:
+    if not output.exists():
+        staging.rename(output)
+        return
+
+    if not force:
+        raise BuildError(f"Output already exists: {output}. Pass --force to replace it.")
+
+    backup = output.parent / f".{output.name}.old-{uuid.uuid4().hex[:8]}"
+    output.rename(backup)
+    try:
+        staging.rename(output)
+    except Exception:
+        backup.rename(output)
+        raise
+    else:
+        shutil.rmtree(backup, ignore_errors=True)
+
+
+def build_game(
+    source: Path | str,
+    *,
+    runtime: Path | str,
+    output: Path | str | None = None,
+    force: bool = False,
+) -> BuildResult:
+    """
+    Create a self-contained Linux ARM64 NW.js directory for an RPG Maker MV game.
+
+    This deliberately implements only the MV path already validated on Steam
+    Frame hardware. MZ detection exists, but MZ builds remain gated until the
+    equivalent runtime transplant has been tested.
+    """
+    source_path = _normalize_path(source)
+    runtime_path = _normalize_path(runtime)
+    output_path = (
+        _normalize_path(output) if output is not None else default_output_path(source_path)
+    )
+
+    if not source_path.is_dir():
+        raise BuildError(f"Source path is not a directory: {source_path}")
+    if not runtime_path.is_dir():
+        raise BuildError(f"Runtime path is not a directory: {runtime_path}")
+
+    inspection = inspect_game(source_path)
+    if not inspection.recognized:
+        detail = "; ".join(inspection.warnings) or "unrecognized game"
+        raise BuildError(f"Could not identify RPG Maker game: {detail}")
+    if inspection.engine is not EngineVariant.MV:
+        raise BuildError(
+            f"Building RPG Maker {inspection.engine.value.upper()} is not enabled yet. "
+            "MV is the first hardware-validated backend."
+        )
+    if inspection.game_root is None:
+        raise BuildError("Detected MV game has no payload root")
+    if not (inspection.game_root / "index.html").is_file():
+        raise BuildError(
+            f"MV payload is missing index.html: {inspection.game_root / 'index.html'}"
+        )
+
+    architecture = _validate_runtime(runtime_path)
+    _validate_paths(source_path, runtime_path, output_path)
+
+    if output_path.exists() and not force:
+        raise BuildError(f"Output already exists: {output_path}. Pass --force to replace it.")
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    staging = _staging_path(output_path)
+    if staging.exists():
+        shutil.rmtree(staging, ignore_errors=True)
+
+    warnings = list(inspection.warnings)
+    warnings.append(
+        "MV is being run on a modern ARM64 NW.js runtime rather than its original "
+        "bundled runtime; test game-specific plugins and media."
+    )
+
+    try:
+        shutil.copytree(
+            runtime_path,
+            staging,
+            symlinks=True,
+            ignore=_ignore_junk,
+            ignore_dangling_symlinks=True,
+        )
+
+        payload_destination = staging / "www"
+        if payload_destination.exists():
+            if payload_destination.is_dir():
+                shutil.rmtree(payload_destination)
+            else:
+                payload_destination.unlink()
+
+        shutil.copytree(
+            inspection.game_root,
+            payload_destination,
+            symlinks=True,
+            ignore=_ignore_junk,
+            ignore_dangling_symlinks=True,
+        )
+
+        _write_package(
+            staging / "package.json",
+            inspection.package_json,
+            source_path,
+        )
+
+        nw_output = staging / "nw"
+        nw_output.chmod(nw_output.stat().st_mode | 0o755)
+        crashpad = staging / "chrome_crashpad_handler"
+        if crashpad.is_file():
+            crashpad.chmod(crashpad.stat().st_mode | 0o755)
+
+        launcher = _write_launcher(staging)
+        _install_staging(staging, output_path, force=force)
+    except BuildError:
+        if staging.exists():
+            shutil.rmtree(staging, ignore_errors=True)
+        raise
+    except Exception as exc:
+        if staging.exists():
+            shutil.rmtree(staging, ignore_errors=True)
+        raise BuildError(f"Build failed: {exc}") from exc
+
+    return BuildResult(
+        success=True,
+        source_path=source_path,
+        output_path=output_path,
+        runtime_path=runtime_path,
+        launcher_path=output_path / launcher.name,
+        engine=inspection.engine,
+        engine_version=inspection.engine_version,
+        game_name=inspection.game_name,
+        runtime_architecture=architecture,
+        warnings=warnings,
+    )

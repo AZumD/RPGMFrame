@@ -69,6 +69,7 @@ def test_detects_mz_layout(tmp_path: Path) -> None:
     assert result.engine is EngineVariant.MZ
     assert result.runtime == "nwjs"
     assert result.confidence is Confidence.HIGH
+    assert result.compatibility is Compatibility.NEEDS_TESTING
     assert result.game_root == tmp_path
     assert result.game_name == "MZ Test Game"
     assert result.engine_version == "1.9.0"

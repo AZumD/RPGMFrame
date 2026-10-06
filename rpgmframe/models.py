@@ -1,4 +1,4 @@
-"""Typed inspection models shared by RPGMFrame backends."""
+"""Typed inspection and build models shared by RPGMFrame backends."""
 
 from __future__ import annotations
 
@@ -26,6 +26,7 @@ class Confidence(str, Enum):
 
 class Compatibility(str, Enum):
     SUPPORTED = "supported"
+    NEEDS_TESTING = "needs_testing"
     UNKNOWN = "unknown"
 
 
@@ -64,4 +65,34 @@ class GameInspection:
             "evidence": list(self.evidence),
             "warnings": list(self.warnings),
             "compatibility": self.compatibility.value,
+        }
+
+
+@dataclass
+class BuildResult:
+    """Result of producing an ARM64 NW.js game directory."""
+
+    success: bool
+    source_path: Path
+    output_path: Path
+    runtime_path: Path
+    launcher_path: Path
+    engine: EngineVariant
+    engine_version: str | None
+    game_name: str | None
+    runtime_architecture: str
+    warnings: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "success": self.success,
+            "source_path": str(self.source_path),
+            "output_path": str(self.output_path),
+            "runtime_path": str(self.runtime_path),
+            "launcher_path": str(self.launcher_path),
+            "engine": self.engine.value,
+            "engine_version": self.engine_version,
+            "game_name": self.game_name,
+            "runtime_architecture": self.runtime_architecture,
+            "warnings": list(self.warnings),
         }

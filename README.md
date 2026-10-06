@@ -4,19 +4,26 @@ Experimental Linux ARM64 runtime-conversion toolkit for RPG Maker games, initial
 
 RPGMFrame is intentionally separate from [RenFrame](https://github.com/AZumD/RenFrame) while the RPG Maker runtime model is still being explored. If both projects stabilize around the same abstractions, they can later become backends of a shared converter.
 
-## First target: RPG Maker MV / MZ
+## Current status
 
-The first milestone is deliberately small:
+RPGMFrame can:
 
 - detect RPG Maker MV and MZ game directories
-- report the detected engine, confidence, evidence, and RPG Maker version when available
-- expose detection through `rpgmframe inspect`
-- keep runtime download and conversion out of the detector
+- report engine, confidence, evidence, title, payload root, and RPG Maker version
+- auto-descend through a single extracted archive wrapper directory
+- build **RPG Maker MV** games around a user-supplied Linux ARM64 NW.js runtime
+- validate that the supplied NW.js `nw` binary is actually AArch64
+- repair an empty NW.js package name while preserving game-specific package settings
+- generate a launcher that discovers a running FrameTop Plasma/Xwayland environment
 
-Later milestones can add:
+The MV runtime-swap path has been validated on Steam Frame hardware with an RPG Maker MV 1.6.1 game.
 
-- Linux ARM64 NW.js runtime resolution and caching
-- MV/MZ build output and launchers
+MZ is detectable but its build path is intentionally gated until the same transplant has been validated on real hardware.
+
+Later targets:
+
+- automatic NW.js download, checksum verification, and caching
+- MZ build support after hardware validation
 - RPG Maker XP/VX/VX Ace through mkxp-z
 - RPG Maker 2000/2003 through EasyRPG Player
 
@@ -38,13 +45,28 @@ pip install -e ".[dev]"
 pytest
 ```
 
-Inspect a game:
+## Inspect
 
 ```bash
 rpgmframe inspect /path/to/game
 rpgmframe inspect /path/to/game --json
 ```
 
-## Status
+## Build MV
 
-Very early prototype. No conversion is performed yet.
+Pass an extracted Linux ARM64 NW.js runtime:
+
+```bash
+rpgmframe build /path/to/mv-game \
+  --runtime /path/to/nwjs-v0.117.0-linux-arm64
+```
+
+The default output is `<source>-frame/`. Use `-o` to choose another directory and `--force` to replace an existing output.
+
+Launch the built game on the Frame with:
+
+```bash
+./launch.sh
+```
+
+The launcher preserves a normal desktop environment, but if it detects FrameTop's nested Plasma session it imports that session's display, Xauthority, and runtime variables before starting NW.js.
