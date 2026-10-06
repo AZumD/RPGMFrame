@@ -269,3 +269,53 @@ def test_warns_about_case_insensitive_collisions(tmp_path: Path) -> None:
     result = build_game(source, runtime=runtime, output=tmp_path / "built")
 
     assert any("Case-insensitive path collisions" in warning for warning in result.warnings)
+
+
+def test_fpsmeter_repair_is_conservative(tmp_path: Path) -> None:
+    source = _mv_game(tmp_path / "source")
+    wrapper = source / "jailbreak_win"
+
+    _write(
+        wrapper / "www/js/rpg_core.js",
+        'Utils.RPGMAKER_VERSION = "1.6.1";\n',
+    )
+
+    runtime = _runtime(tmp_path / "nwjs")
+    output = tmp_path / "built"
+    result = build_game(source, runtime=runtime, output=output)
+
+    index_html = (output / "www/index.html").read_text(encoding="utf-8")
+    assert "js/libs/fpsmeter.js" not in index_html
+    assert not any("fpsmeter.js" in warning for warning in result.warnings)
+
+
+def test_compat_shim_guards_package_scope_and_multiple_io_paths(
+    tmp_path: Path,
+) -> None:
+    source = _mv_game(tmp_path / "source")
+    runtime = _runtime(tmp_path / "nwjs")
+    output = tmp_path / "built"
+
+    build_game(source, runtime=runtime, output=output)
+
+    shim = (output / "www/js/rpgmframe-compat.js").read_text(encoding="utf-8")
+    assert "isInsidePackage" in shim
+    assert "readFileSync" in shim
+    assert "fs.promises" in shim
+    assert "XMLHttpRequest.prototype.open" in shim
+    assert "window.fetch" in shim
+    assert "HTMLImageElement" in shim
+    assert "matches.length !== 1" in shim
+
+
+def test_case_compatibility_does_not_rename_source_assets(tmp_path: Path) -> None:
+    source = _mv_game(tmp_path / "source")
+    wrapper = source / "jailbreak_win"
+    _write(wrapper / "www/img/pictures/leaf.png", "leaf")
+
+    runtime = _runtime(tmp_path / "nwjs")
+    output = tmp_path / "built"
+    build_game(source, runtime=runtime, output=output)
+
+    assert (output / "www/img/pictures/leaf.png").is_file()
+    assert not (output / "www/img/pictures/Leaf.png").exists()

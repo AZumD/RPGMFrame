@@ -27,7 +27,9 @@ RPGMFrame can:
 
 The MV runtime-swap path has been validated on Steam Frame hardware with an RPG Maker MV 1.6.1 game.
 
-Both MV and MZ runtime-swap paths have now been validated on Steam Frame hardware. MV was validated with Jailbreak (RPG Maker MV 1.6.1). MZ was validated with Look Outside 0.30 (RPG Maker MZ 1.8.1), including gameplay, controller input, audio, menus/settings, save/load, and relaunch.
+Both MV and MZ runtime-swap paths have now been validated on Steam Frame hardware. MV was validated with Jailbreak (RPG Maker MV 1.6.1) and with OMORI 1.0.8d (RPG Maker MV 1.6.1), using a clean RPGMFrame build with no hand-edits to the converted output. MZ was validated with Look Outside 0.30 (RPG Maker MZ 1.8.1), including gameplay, controller input, audio, menus/settings, save/load, and relaunch.
+
+OMORI is intentionally treated as a compatibility stress test rather than a game-specific target. The fixes learned from it are implemented as generic Windows/NW.js-to-Linux behavior. See [Compatibility notes](docs/compatibility.md).
 
 The default runtime is pinned to **NW.js 0.117.0**, the version currently validated on Steam Frame. Use `--runtime-version` to test another official release or `--runtime` to supply an extracted runtime directly.
 
