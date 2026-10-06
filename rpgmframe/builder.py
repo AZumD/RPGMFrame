@@ -265,11 +265,6 @@ def build_game(
         warnings = list(inspection.warnings)
         if prepared.archive_type:
             warnings.insert(0, f"Built directly from {prepared.archive_type.upper()} input")
-        if inspection.engine is EngineVariant.MZ:
-            warnings.append(
-                "MZ ARM64 builds are experimental and have not yet been hardware-validated; "
-                "test plugins, saves, input, audio, video, and graphics carefully."
-            )
         warnings.append(
             f"{inspection.engine.value.upper()} is being run on a modern ARM64 NW.js runtime "
             "rather than its original bundled runtime; test game-specific plugins and media."

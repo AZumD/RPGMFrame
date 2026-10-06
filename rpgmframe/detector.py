@@ -292,9 +292,5 @@ def inspect_game(path: Path | str) -> GameInspection:
         package_json=package_json,
         evidence=list(best.evidence),
         warnings=warnings,
-        compatibility=(
-            Compatibility.SUPPORTED
-            if best.engine is EngineVariant.MV
-            else Compatibility.NEEDS_TESTING
-        ),
+        compatibility=Compatibility.SUPPORTED,
     )

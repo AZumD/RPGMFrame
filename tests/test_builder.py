@@ -90,7 +90,7 @@ def test_rejects_x86_64_runtime(tmp_path: Path) -> None:
         build_game(source, runtime=runtime, output=tmp_path / "built")
 
 
-def test_builds_mz_experimentally_with_arm64_nwjs(tmp_path: Path) -> None:
+def test_builds_mz_with_arm64_nwjs(tmp_path: Path) -> None:
     source = tmp_path / "mz"
     _write(source / "js/rmmz_core.js", 'Utils.RPGMAKER_VERSION = "1.8.1";')
     _write(source / "js/rmmz_managers.js", "/* managers */")
@@ -130,7 +130,7 @@ def test_builds_mz_experimentally_with_arm64_nwjs(tmp_path: Path) -> None:
     assert package["main"] == "www/index.html"
     assert package["chromium-args"] == "--force-color-profile=srgb --disable-devtools"
     assert package["window"]["icon"] == "icon/icon.png"
-    assert any("MZ ARM64 builds are experimental" in warning for warning in result.warnings)
+    assert not any("experimental" in warning.lower() for warning in result.warnings)
 
 
 def test_force_replaces_existing_output(tmp_path: Path) -> None:
