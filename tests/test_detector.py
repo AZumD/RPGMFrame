@@ -111,3 +111,27 @@ def test_missing_path_is_not_recognized(tmp_path: Path) -> None:
 
     assert not result.recognized
     assert any("does not exist" in warning for warning in result.warnings)
+
+
+def test_auto_descends_single_wrapper_directory(tmp_path: Path) -> None:
+    wrapper = tmp_path / "jailbreak_win"
+    _write(
+        wrapper / "www/js/rpg_core.js",
+        'Utils.RPGMAKER_VERSION = "1.6.1";\n',
+    )
+    _write_system(wrapper / "www/data/System.json", "Wrapped MV")
+    _write(wrapper / "www/index.html", "<html></html>")
+    _write(
+        wrapper / "package.json",
+        json.dumps({"name": "wrapped-mv", "main": "www/index.html"}),
+    )
+
+    result = inspect_game(tmp_path)
+
+    assert result.engine is EngineVariant.MV
+    assert result.game_root == wrapper / "www"
+    assert result.package_json == wrapper / "package.json"
+    assert result.game_name == "Wrapped MV"
+    assert result.engine_version == "1.6.1"
+    assert "jailbreak_win/www/js/rpg_core.js" in result.evidence
+    assert any("Auto-descended" in warning for warning in result.warnings)
