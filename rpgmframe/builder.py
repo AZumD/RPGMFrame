@@ -1,4 +1,4 @@
-"""Build a Linux ARM64 RPG Maker MV package around an NW.js runtime."""
+"""Build Linux ARM64 RPG Maker MV/MZ packages around an NW.js runtime."""
 
 from __future__ import annotations
 
@@ -202,7 +202,7 @@ def build_game(
     force: bool = False,
     progress: Callable[[str], None] | None = None,
 ) -> BuildResult:
-    """Create a self-contained Linux ARM64 NW.js directory for an RPG Maker MV game."""
+    """Create a self-contained Linux ARM64 NW.js directory for an RPG Maker MV/MZ game."""
     source_path = _normalize_path(source)
     output_path = (
         _normalize_path(output) if output is not None else default_output_path(source_path)
@@ -222,16 +222,18 @@ def build_game(
         if not inspection.recognized:
             detail = "; ".join(inspection.warnings) or "unrecognized game"
             raise BuildError(f"Could not identify RPG Maker game: {detail}")
-        if inspection.engine is not EngineVariant.MV:
+        if inspection.engine not in {EngineVariant.MV, EngineVariant.MZ}:
             raise BuildError(
-                f"Building RPG Maker {inspection.engine.value.upper()} is not enabled yet. "
-                "MV is the first hardware-validated backend."
+                f"Building RPG Maker {inspection.engine.value.upper()} is not enabled yet."
             )
         if inspection.game_root is None:
-            raise BuildError("Detected MV game has no payload root")
+            raise BuildError(
+                f"Detected {inspection.engine.value.upper()} game has no payload root"
+            )
         if not (inspection.game_root / "index.html").is_file():
             raise BuildError(
-                f"MV payload is missing index.html: {inspection.game_root / 'index.html'}"
+                f"{inspection.engine.value.upper()} payload is missing index.html: "
+                f"{inspection.game_root / 'index.html'}"
             )
 
         if runtime is None:
@@ -263,9 +265,14 @@ def build_game(
         warnings = list(inspection.warnings)
         if prepared.archive_type:
             warnings.insert(0, f"Built directly from {prepared.archive_type.upper()} input")
+        if inspection.engine is EngineVariant.MZ:
+            warnings.append(
+                "MZ ARM64 builds are experimental and have not yet been hardware-validated; "
+                "test plugins, saves, input, audio, video, and graphics carefully."
+            )
         warnings.append(
-            "MV is being run on a modern ARM64 NW.js runtime rather than its original "
-            "bundled runtime; test game-specific plugins and media."
+            f"{inspection.engine.value.upper()} is being run on a modern ARM64 NW.js runtime "
+            "rather than its original bundled runtime; test game-specific plugins and media."
         )
 
         try:

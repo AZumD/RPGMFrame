@@ -12,6 +12,7 @@ RPGMFrame can:
 - report engine, confidence, evidence, title, payload root, and RPG Maker version
 - auto-descend through a single extracted archive wrapper directory
 - build **RPG Maker MV** games around Linux ARM64 NW.js
+- build **RPG Maker MZ** games experimentally around Linux ARM64 NW.js
 - build directly from `.zip` downloads without manual extraction
 - optionally package completed builds as portable `.tar.gz` archives
 - automatically download, SHA256-verify, and cache the pinned NW.js ARM64 runtime
@@ -22,7 +23,7 @@ RPGMFrame can:
 
 The MV runtime-swap path has been validated on Steam Frame hardware with an RPG Maker MV 1.6.1 game.
 
-MZ is detectable but its build path is intentionally gated until the same transplant has been validated on real hardware.
+MZ is detectable and buildable, but remains marked `needs_testing` until the transplant is validated on Steam Frame hardware. The first real-world MZ specimen is Look Outside 0.30 (RPG Maker MZ 1.8.1).
 
 The default runtime is pinned to **NW.js 0.117.0**, the version currently validated on Steam Frame. Use `--runtime-version` to test another official release or `--runtime` to supply an extracted runtime directly.
 
@@ -42,7 +43,7 @@ rpgmframe inspect /path/to/game
 rpgmframe inspect /path/to/game --json
 ```
 
-## Build MV
+## Build MV / MZ
 
 Normal use now needs only the game directory:
 

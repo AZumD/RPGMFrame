@@ -90,15 +90,47 @@ def test_rejects_x86_64_runtime(tmp_path: Path) -> None:
         build_game(source, runtime=runtime, output=tmp_path / "built")
 
 
-def test_refuses_mz_build_until_validated(tmp_path: Path) -> None:
+def test_builds_mz_experimentally_with_arm64_nwjs(tmp_path: Path) -> None:
     source = tmp_path / "mz"
-    _write(source / "js/rmmz_core.js", 'Utils.RPGMAKER_VERSION = "1.9.0";')
+    _write(source / "js/rmmz_core.js", 'Utils.RPGMAKER_VERSION = "1.8.1";')
+    _write(source / "js/rmmz_managers.js", "/* managers */")
     _write(source / "data/System.json", json.dumps({"gameTitle": "Test MZ"}))
     _write(source / "index.html", "<html>mz</html>")
+    _write(source / "icon/icon.png", "icon")
+    _write(
+        source / "package.json",
+        json.dumps(
+            {
+                "name": "rmmz-game",
+                "main": "index.html",
+                "chromium-args": "--force-color-profile=srgb --disable-devtools",
+                "window": {
+                    "title": "Test MZ",
+                    "width": 816,
+                    "height": 624,
+                    "icon": "icon/icon.png",
+                },
+            }
+        ),
+    )
     runtime = _runtime(tmp_path / "nwjs")
+    output = tmp_path / "built"
 
-    with pytest.raises(BuildError, match="MZ.*not enabled"):
-        build_game(source, runtime=runtime, output=tmp_path / "built")
+    result = build_game(source, runtime=runtime, output=output)
+
+    assert result.success
+    assert result.engine.value == "mz"
+    assert (output / "www/js/rmmz_core.js").is_file()
+    assert (output / "www/js/rmmz_managers.js").is_file()
+    assert (output / "www/index.html").is_file()
+    assert (output / "www/icon/icon.png").is_file()
+
+    package = json.loads((output / "package.json").read_text(encoding="utf-8"))
+    assert package["name"] == "rmmz-game"
+    assert package["main"] == "www/index.html"
+    assert package["chromium-args"] == "--force-color-profile=srgb --disable-devtools"
+    assert package["window"]["icon"] == "icon/icon.png"
+    assert any("MZ ARM64 builds are experimental" in warning for warning in result.warnings)
 
 
 def test_force_replaces_existing_output(tmp_path: Path) -> None:
