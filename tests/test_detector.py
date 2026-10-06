@@ -1,0 +1,113 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from rpgmframe.detector import inspect_game
+from rpgmframe.models import Compatibility, Confidence, EngineVariant
+
+
+def _write(path: Path, content: str = "") -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+
+
+def _write_system(path: Path, title: str) -> None:
+    _write(path, json.dumps({"gameTitle": title}))
+
+
+def test_detects_windows_mv_layout(tmp_path: Path) -> None:
+    _write(
+        tmp_path / "www/js/rpg_core.js",
+        'Utils.RPGMAKER_VERSION = "1.6.2";\n',
+    )
+    _write_system(tmp_path / "www/data/System.json", "MV Test Game")
+    _write(tmp_path / "www/index.html", "<html></html>")
+    _write(
+        tmp_path / "package.json",
+        json.dumps({"name": "mv-test", "main": "www/index.html"}),
+    )
+
+    result = inspect_game(tmp_path)
+
+    assert result.engine is EngineVariant.MV
+    assert result.runtime == "nwjs"
+    assert result.compatibility is Compatibility.SUPPORTED
+    assert result.confidence is Confidence.HIGH
+    assert result.game_root == tmp_path / "www"
+    assert result.game_name == "MV Test Game"
+    assert result.engine_version == "1.6.2"
+    assert result.package_json == tmp_path / "package.json"
+
+
+def test_detects_mv_when_payload_root_is_selected(tmp_path: Path) -> None:
+    _write(tmp_path / "js/rpg_core.js", 'Utils.RPGMAKER_VERSION = "1.5.1";')
+    _write_system(tmp_path / "data/System.json", "Bare MV")
+
+    result = inspect_game(tmp_path)
+
+    assert result.engine is EngineVariant.MV
+    assert result.game_root == tmp_path
+    assert result.game_name == "Bare MV"
+    assert result.engine_version == "1.5.1"
+
+
+def test_detects_mz_layout(tmp_path: Path) -> None:
+    _write(
+        tmp_path / "js/rmmz_core.js",
+        'Utils.RPGMAKER_VERSION = "1.9.0";\n',
+    )
+    _write_system(tmp_path / "data/System.json", "MZ Test Game")
+    _write(tmp_path / "index.html", "<html></html>")
+    _write(
+        tmp_path / "package.json",
+        json.dumps({"name": "mz-test", "main": "index.html"}),
+    )
+
+    result = inspect_game(tmp_path)
+
+    assert result.engine is EngineVariant.MZ
+    assert result.runtime == "nwjs"
+    assert result.confidence is Confidence.HIGH
+    assert result.game_root == tmp_path
+    assert result.game_name == "MZ Test Game"
+    assert result.engine_version == "1.9.0"
+
+
+def test_package_json_alone_is_not_treated_as_rpg_maker(tmp_path: Path) -> None:
+    _write(tmp_path / "package.json", json.dumps({"name": "definitely-not-rpgmaker"}))
+
+    result = inspect_game(tmp_path)
+
+    assert result.engine is EngineVariant.UNKNOWN
+    assert not result.recognized
+    assert result.compatibility is Compatibility.UNKNOWN
+
+
+def test_core_without_system_json_warns_but_is_recognized(tmp_path: Path) -> None:
+    _write(tmp_path / "js/rmmz_core.js", 'Utils.RPGMAKER_VERSION = "1.8.0";')
+
+    result = inspect_game(tmp_path)
+
+    assert result.engine is EngineVariant.MZ
+    assert result.recognized
+    assert result.confidence is Confidence.LOW
+    assert any("System.json" in warning for warning in result.warnings)
+
+
+def test_equal_mv_mz_signatures_are_rejected_as_ambiguous(tmp_path: Path) -> None:
+    _write(tmp_path / "js/rpg_core.js", "")
+    _write(tmp_path / "js/rmmz_core.js", "")
+
+    result = inspect_game(tmp_path)
+
+    assert result.engine is EngineVariant.UNKNOWN
+    assert not result.recognized
+    assert any("Conflicting MV and MZ" in warning for warning in result.warnings)
+
+
+def test_missing_path_is_not_recognized(tmp_path: Path) -> None:
+    result = inspect_game(tmp_path / "missing")
+
+    assert not result.recognized
+    assert any("does not exist" in warning for warning in result.warnings)

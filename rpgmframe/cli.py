@@ -1,0 +1,74 @@
+"""Command-line entry point for RPGMFrame."""
+
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+
+from rpgmframe.detector import inspect_game
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="rpgmframe",
+        description="Inspect and convert RPG Maker games for Linux ARM64.",
+    )
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    inspect_parser = subparsers.add_parser(
+        "inspect",
+        help="Detect the RPG Maker engine used by a game directory.",
+    )
+    inspect_parser.add_argument("path", type=Path)
+    inspect_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Print the inspection result as JSON.",
+    )
+
+    return parser
+
+
+def _print_human(result) -> None:
+    print(f"Source:        {result.source_path}")
+    print(f"Engine:        {result.engine.value}")
+    print(f"Runtime:       {result.runtime or 'unknown'}")
+    print(f"Confidence:    {result.confidence.value}")
+    print(f"Compatibility: {result.compatibility.value}")
+    if result.game_root:
+        print(f"Game root:     {result.game_root}")
+    if result.game_name:
+        print(f"Game name:     {result.game_name}")
+    if result.engine_version:
+        print(f"Engine version:{' ' if result.engine_version else ''}{result.engine_version}")
+    if result.package_json:
+        print(f"package.json:  {result.package_json}")
+
+    if result.evidence:
+        print("Evidence:")
+        for item in result.evidence:
+            print(f"  - {item}")
+
+    if result.warnings:
+        print("Warnings:")
+        for item in result.warnings:
+            print(f"  - {item}")
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _build_parser().parse_args(argv)
+
+    if args.command == "inspect":
+        result = inspect_game(args.path)
+        if args.json:
+            print(json.dumps(result.to_dict(), indent=2))
+        else:
+            _print_human(result)
+        return 0 if result.recognized else 2
+
+    return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
