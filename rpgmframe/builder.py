@@ -11,6 +11,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from rpgmframe.compat import install_compatibility
 from rpgmframe.detector import inspect_game
 from rpgmframe.elf import read_elf_architecture
 from rpgmframe.models import BuildResult, EngineVariant
@@ -23,6 +24,27 @@ class BuildError(RuntimeError):
 
 
 _IGNORE_NAMES = frozenset({".git", "__pycache__", ".DS_Store"})
+
+# Files installed beside www/ by the stock Windows NW.js export. These are
+# replaced by the Linux ARM64 runtime and must not leak into the converted root.
+_WINDOWS_RUNTIME_ROOT_NAMES = frozenset(
+    {
+        "d3dcompiler_47.dll",
+        "ffmpeg.dll",
+        "icudtl.dat",
+        "libegl.dll",
+        "libglesv2.dll",
+        "locales",
+        "natives_blob.bin",
+        "node.dll",
+        "nw.dll",
+        "nw_elf.dll",
+        "resources.pak",
+        "snapshot_blob.bin",
+        "swiftshader",
+    }
+)
+_WINDOWS_RUNTIME_ROOT_SUFFIXES = frozenset({".dll", ".exe", ".pdb"})
 
 
 def _normalize_path(path: Path | str) -> Path:
@@ -72,12 +94,33 @@ def _write_package(
     destination: Path,
     source_package: Path | None,
     source_path: Path,
+    game_root: Path,
 ) -> None:
     package = _load_package(source_package)
     if not isinstance(package.get("name"), str) or not package["name"].strip():
         package["name"] = _package_slug(source_path)
 
     package["main"] = "www/index.html"
+
+    # Bare MZ-style deployments keep package.json next to index.html. RPGMFrame
+    # relocates that payload under www/, so package-root asset references need
+    # the same prefix. Preserve remote/absolute icon URLs unchanged.
+    window = package.get("window")
+    if (
+        source_package is not None
+        and source_package.parent == game_root
+        and isinstance(window, dict)
+    ):
+        icon = window.get("icon")
+        if isinstance(icon, str) and icon.strip():
+            icon_path = Path(icon)
+            if (
+                not icon_path.is_absolute()
+                and "://" not in icon
+                and not icon.replace("\\", "/").startswith("www/")
+                and (game_root / icon_path).is_file()
+            ):
+                window["icon"] = f"www/{icon_path.as_posix()}"
 
     destination.write_text(
         json.dumps(package, ensure_ascii=False, indent=4) + "\n",
@@ -132,6 +175,14 @@ if [[ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ]]; then
     fi
 fi
 
+# Windows-authored NW.js plugins frequently expect these environment variables.
+# Map them to their Linux/XDG equivalents only when the caller did not set them.
+export LOCALAPPDATA="${LOCALAPPDATA:-${XDG_DATA_HOME:-$HOME/.local/share}}"
+export APPDATA="${APPDATA:-${XDG_CONFIG_HOME:-$HOME/.config}}"
+export USERPROFILE="${USERPROFILE:-$HOME}"
+
+# Match the working-directory assumption of Windows RPG Maker deployments.
+cd "$ROOT"
 exec "$ROOT/nw" "$ROOT" "$@"
 '''
 
@@ -167,6 +218,56 @@ def _validate_paths(source: Path, runtime: Path, output: Path) -> None:
         raise BuildError(
             f"Output path must not overlap the runtime: runtime={runtime}, output={output}"
         )
+
+
+def _is_windows_runtime_baggage(path: Path) -> bool:
+    name = path.name.lower()
+    return (
+        name in _WINDOWS_RUNTIME_ROOT_NAMES
+        or path.suffix.lower() in _WINDOWS_RUNTIME_ROOT_SUFFIXES
+    )
+
+
+def _copy_root_companions(
+    source_root: Path,
+    game_root: Path,
+    destination: Path,
+) -> list[str]:
+    """
+    Preserve game-owned files beside www/ while dropping the old Windows runtime.
+
+    Many MV games use Node's fs APIs against package-root data instead of only
+    browser-relative paths below www/. Copying only www/ silently drops those
+    companion resources.
+    """
+    if game_root.parent != source_root or game_root.name.lower() != "www":
+        return []
+
+    copied: list[str] = []
+    for entry in source_root.iterdir():
+        if entry == game_root or entry.name == "package.json":
+            continue
+        if entry.name in _IGNORE_NAMES or entry.name.endswith(".pyc"):
+            continue
+        if _is_windows_runtime_baggage(entry):
+            continue
+
+        target = destination / entry.name
+        if entry.is_dir():
+            shutil.copytree(
+                entry,
+                target,
+                symlinks=True,
+                ignore=_ignore_junk,
+                ignore_dangling_symlinks=True,
+            )
+        elif entry.is_file():
+            shutil.copy2(entry, target, follow_symlinks=False)
+        else:
+            continue
+        copied.append(entry.name)
+
+    return copied
 
 
 def _staging_path(output: Path) -> Path:
@@ -294,10 +395,36 @@ def build_game(
                 ignore_dangling_symlinks=True,
             )
 
+            package_root = (
+                inspection.package_json.parent
+                if inspection.package_json is not None
+                else inspection.game_root
+            )
+            companions = _copy_root_companions(
+                package_root,
+                inspection.game_root,
+                staging,
+            )
+            if companions:
+                preview = ", ".join(sorted(companions)[:8])
+                if len(companions) > 8:
+                    preview += f", +{len(companions) - 8} more"
+                warnings.append(
+                    f"Preserved game-owned package-root companion entries: {preview}"
+                )
+
+            warnings.extend(
+                install_compatibility(
+                    payload_destination,
+                    engine=inspection.engine,
+                )
+            )
+
             _write_package(
                 staging / "package.json",
                 inspection.package_json,
                 source_path,
+                inspection.game_root,
             )
 
             nw_output = staging / "nw"

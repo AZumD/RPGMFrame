@@ -29,10 +29,14 @@ def _mv_game(root: Path) -> Path:
     wrapper = root / "jailbreak_win"
     _write(
         wrapper / "www/js/rpg_core.js",
-        'Utils.RPGMAKER_VERSION = "1.6.1";\n',
+        'Utils.RPGMAKER_VERSION = "1.6.1";\nvar meter = new FPSMeter();\n',
     )
     _write(wrapper / "www/data/System.json", json.dumps({"gameTitle": "Test MV"}))
-    _write(wrapper / "www/index.html", "<html>mv</html>")
+    _write(
+        wrapper / "www/index.html",
+        '<html><head><script type="text/javascript" src="js/rpg_core.js"></script></head></html>',
+    )
+    _write(wrapper / "www/js/libs/fpsmeter.js", "window.FPSMeter = function() {};")
     _write(wrapper / "www/js/plugins.js", "var $plugins = [];")
     _write(
         wrapper / "package.json",
@@ -69,6 +73,13 @@ def test_builds_mv_with_arm64_nwjs(tmp_path: Path) -> None:
     assert (output / "www/js/rpg_core.js").is_file()
     assert (output / "www/data/System.json").is_file()
     assert (output / "launch.sh").is_file()
+    assert (output / "www/js/rpgmframe-compat.js").is_file()
+
+    index_html = (output / "www/index.html").read_text(encoding="utf-8")
+    assert "js/rpgmframe-compat.js" in index_html
+    assert "js/libs/fpsmeter.js" in index_html
+    assert index_html.index("rpgmframe-compat.js") < index_html.index("rpg_core.js")
+    assert index_html.index("fpsmeter.js") < index_html.index("rpg_core.js")
 
     package = json.loads((output / "package.json").read_text(encoding="utf-8"))
     assert package["name"] == "rpgmframe-source"
@@ -79,6 +90,10 @@ def test_builds_mv_with_arm64_nwjs(tmp_path: Path) -> None:
     launcher = (output / "launch.sh").read_text(encoding="utf-8")
     assert "plasmashell" in launcher
     assert "XAUTHORITY" in launcher
+    assert "LOCALAPPDATA" in launcher
+    assert "APPDATA" in launcher
+    assert "USERPROFILE" in launcher
+    assert 'cd "$ROOT"' in launcher
     assert 'exec "$ROOT/nw" "$ROOT" "$@"' in launcher
 
 
@@ -129,7 +144,7 @@ def test_builds_mz_with_arm64_nwjs(tmp_path: Path) -> None:
     assert package["name"] == "rmmz-game"
     assert package["main"] == "www/index.html"
     assert package["chromium-args"] == "--force-color-profile=srgb --disable-devtools"
-    assert package["window"]["icon"] == "icon/icon.png"
+    assert package["window"]["icon"] == "www/icon/icon.png"
     assert not any("experimental" in warning.lower() for warning in result.warnings)
 
 
@@ -217,3 +232,36 @@ def test_default_zip_output_drops_zip_suffix(tmp_path: Path) -> None:
     from rpgmframe.builder import default_output_path
 
     assert default_output_path(archive) == tmp_path / "game-frame"
+
+
+def test_preserves_mv_package_root_companions_without_windows_runtime(
+    tmp_path: Path,
+) -> None:
+    source = _mv_game(tmp_path / "source")
+    wrapper = source / "jailbreak_win"
+    _write(wrapper / "data/Quests.yaml", "quests: {}\n")
+    _write(wrapper / "steam_appid.txt", "123456\n")
+    _write(wrapper / "Game.exe", "windows runtime")
+    _write(wrapper / "nw.dll", "windows runtime")
+
+    runtime = _runtime(tmp_path / "nwjs")
+    output = tmp_path / "built"
+    result = build_game(source, runtime=runtime, output=output)
+
+    assert (output / "data/Quests.yaml").is_file()
+    assert (output / "steam_appid.txt").read_text(encoding="utf-8") == "123456\n"
+    assert not (output / "Game.exe").exists()
+    assert not (output / "nw.dll").exists()
+    assert any("package-root companion" in warning for warning in result.warnings)
+
+
+def test_warns_about_case_insensitive_collisions(tmp_path: Path) -> None:
+    source = _mv_game(tmp_path / "source")
+    wrapper = source / "jailbreak_win"
+    _write(wrapper / "www/img/pictures/Foo.png", "upper")
+    _write(wrapper / "www/img/pictures/foo.png", "lower")
+
+    runtime = _runtime(tmp_path / "nwjs")
+    result = build_game(source, runtime=runtime, output=tmp_path / "built")
+
+    assert any("Case-insensitive path collisions" in warning for warning in result.warnings)

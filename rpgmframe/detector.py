@@ -221,8 +221,9 @@ def inspect_game(path: Path | str) -> GameInspection:
     Detect RPG Maker MV/MZ using engine-specific JavaScript runtime files.
 
     Generic markers such as package.json are never sufficient on their own.
-    If the selected directory contains one obvious wrapper directory, that
-    directory is inspected automatically as a convenience for extracted ZIPs.
+    If the selected directory contains an unambiguous chain of wrapper
+    directories, RPGMFrame descends through it automatically. This handles
+    archives shaped like release/game/www without guessing across siblings.
     """
     root = _normalize_path(path)
 
@@ -237,12 +238,22 @@ def inspect_game(path: Path | str) -> GameInspection:
             warnings=[f"Path is not a directory: {root}"],
         )
 
-    candidates = _collect_candidates(root, evidence_root=root)
-    wrapper: Path | None = None
-    if not candidates:
-        wrapper = _single_wrapper_child(root)
-        if wrapper is not None:
-            candidates = _collect_candidates(wrapper, evidence_root=root)
+    current_root = root
+    wrapper_chain: list[Path] = []
+    seen_roots = {root}
+    candidates = _collect_candidates(current_root, evidence_root=root)
+
+    while not candidates and len(wrapper_chain) < 16:
+        wrapper = _single_wrapper_child(current_root)
+        if wrapper is None:
+            break
+        resolved_wrapper = wrapper.resolve()
+        if resolved_wrapper in seen_roots:
+            break
+        seen_roots.add(resolved_wrapper)
+        wrapper_chain.append(wrapper)
+        current_root = wrapper
+        candidates = _collect_candidates(current_root, evidence_root=root)
 
     if not candidates:
         return GameInspection(
@@ -271,9 +282,10 @@ def inspect_game(path: Path | str) -> GameInspection:
 
     package_json = _find_package_json(best.source_root, best.game_root)
     warnings: list[str] = []
-    if wrapper is not None:
+    if wrapper_chain:
         warnings.append(
-            f"Auto-descended into wrapper directory: {_relative(wrapper, root)}"
+            "Auto-descended through wrapper directories: "
+            f"{_relative(wrapper_chain[-1], root)}"
         )
     if not (best.game_root / "data" / "System.json").is_file():
         warnings.append(

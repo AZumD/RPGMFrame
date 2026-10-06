@@ -10,7 +10,7 @@ RPGMFrame can:
 
 - detect RPG Maker MV and MZ game directories
 - report engine, confidence, evidence, title, payload root, and RPG Maker version
-- auto-descend through a single extracted archive wrapper directory
+- auto-descend through unambiguous chains of extracted archive wrapper directories
 - build **RPG Maker MV** games around Linux ARM64 NW.js
 - build **RPG Maker MZ** games around Linux ARM64 NW.js
 - build directly from `.zip` downloads without manual extraction
@@ -20,6 +20,10 @@ RPGMFrame can:
 - validate that the NW.js `nw` binary is actually AArch64
 - repair an empty NW.js package name while preserving game-specific package settings
 - generate a launcher that discovers a running FrameTop Plasma/Xwayland environment
+- provide Windows-style environment defaults such as LOCALAPPDATA, APPDATA, and USERPROFILE
+- preserve game-owned package-root companion files while dropping the old Windows NW.js runtime
+- inject a generic case-insensitive Linux path compatibility shim for browser assets and Node fs reads
+- repair a missing MV fpsmeter.js include when the core requires it and the shipped library is present
 
 The MV runtime-swap path has been validated on Steam Frame hardware with an RPG Maker MV 1.6.1 game.
 
@@ -95,4 +99,6 @@ Launch the built game on the Frame with:
 ./launch.sh
 ```
 
-The launcher preserves a normal desktop environment, but if it detects FrameTop's nested Plasma session it imports that session's display, Xauthority, and runtime variables before starting NW.js.
+The launcher preserves a normal desktop environment, but if it detects FrameTop's nested Plasma session it imports that session's display, Xauthority, and runtime variables before starting NW.js. It also maps common Windows profile environment variables to Linux/XDG locations and starts NW.js with the converted package as its working directory.
+
+Converted MV/MZ payloads include a small RPGMFrame compatibility shim. It only rewrites failed, package-local reads when the requested path differs from an existing file by case. This covers both browser-side resources such as images/audio and Node fs calls used by plugins. Exact paths are left alone, external paths are not rewritten, and case-colliding source trees are reported instead of guessed.
