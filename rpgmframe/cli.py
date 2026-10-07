@@ -16,13 +16,13 @@ from rpgmframe.runtime import DEFAULT_NWJS_VERSION
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="rpgmframe",
-        description="Inspect and convert RPG Maker games for Linux ARM64.",
+        description="Inspect and convert RPG Maker and Godot games for Linux ARM64.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     inspect_parser = subparsers.add_parser(
         "inspect",
-        help="Detect the RPG Maker engine used by a game directory.",
+        help="Detect the supported engine used by a game directory.",
     )
     inspect_parser.add_argument("path", type=Path)
     inspect_parser.add_argument(
@@ -35,7 +35,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "build",
         help="Build a Linux ARM64 package with the matching engine runtime.",
     )
-    build_parser.add_argument("path", type=Path, help="RPG Maker game directory or .zip archive")
+    build_parser.add_argument("path", type=Path, help="Game directory or .zip archive")
     build_parser.add_argument(
         "--runtime",
         type=Path,
@@ -46,7 +46,8 @@ def _build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_NWJS_VERSION,
         help=(
             "NW.js version for MV/MZ when --runtime is omitted; "
-            "XP/VX/VX Ace use RPGMFrame's pinned mkxp-z artifact "
+            "XP/VX/VX Ace use RPGMFrame's pinned mkxp-z artifact; "
+            "Godot uses the exact version read from its PCK "
             f"(default NW.js: {DEFAULT_NWJS_VERSION})"
         ),
     )

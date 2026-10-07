@@ -1,4 +1,4 @@
-"""Conservative RPG Maker generation detection."""
+"""Conservative game engine detection for RPG Maker and Godot."""
 
 from __future__ import annotations
 
@@ -321,7 +321,7 @@ def _confidence_for_score(score: int) -> Confidence:
 
 def inspect_game(path: Path | str) -> GameInspection:
     """
-    Detect RPG Maker XP/VX/VX Ace/MV/MZ using generation-specific signatures.
+    Detect Godot plus RPG Maker XP/VX/VX Ace/MV/MZ signatures.
 
     Wrapper descent remains conservative: RPGMFrame only descends while there
     is exactly one obvious child directory.
@@ -338,6 +338,12 @@ def inspect_game(path: Path | str) -> GameInspection:
             source_path=root,
             warnings=[f"Path is not a directory: {root}"],
         )
+
+    from rpgmframe.godot import inspect_godot
+
+    godot = inspect_godot(root)
+    if godot is not None and (godot.recognized or godot.family.value == "godot"):
+        return godot
 
     current_root = root
     wrapper_chain: list[Path] = []
@@ -360,8 +366,8 @@ def inspect_game(path: Path | str) -> GameInspection:
         return GameInspection(
             source_path=root,
             warnings=[
-                "No supported RPG Maker engine signature was found "
-                "(XP/VX/VX Ace RGSS data or MV/MZ JavaScript core)."
+                "No supported game engine signature was found "
+                "(Godot PCK, XP/VX/VX Ace RGSS data, or MV/MZ JavaScript core)."
             ],
         )
 

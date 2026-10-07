@@ -10,6 +10,7 @@ from typing import Any
 
 class EngineFamily(str, Enum):
     RPG_MAKER = "rpgmaker"
+    GODOT = "godot"
 
 
 class EngineVariant(str, Enum):
@@ -18,6 +19,7 @@ class EngineVariant(str, Enum):
     VX_ACE = "vxace"
     MV = "mv"
     MZ = "mz"
+    GODOT = "godot"
     UNKNOWN = "unknown"
 
 
@@ -35,7 +37,7 @@ class Compatibility(str, Enum):
 
 @dataclass
 class GameInspection:
-    """Result of identifying a candidate RPG Maker game directory."""
+    """Result of identifying a supported game directory."""
 
     source_path: Path
     family: EngineFamily = EngineFamily.RPG_MAKER

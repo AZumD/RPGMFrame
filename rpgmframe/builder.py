@@ -1,4 +1,4 @@
-"""Build Linux ARM64 RPG Maker MV/MZ packages around an NW.js runtime."""
+"""Build Linux ARM64 game packages using engine-specific runtimes."""
 
 from __future__ import annotations
 
@@ -250,7 +250,7 @@ def build_game(
     force: bool = False,
     progress: Callable[[str], None] | None = None,
 ) -> BuildResult:
-    """Create a self-contained Linux ARM64 NW.js directory for an RPG Maker MV/MZ game."""
+    """Create a self-contained Linux ARM64 package for a supported game."""
     source_path = _normalize_path(source)
     output_path = (
         _normalize_path(output) if output is not None else default_output_path(source_path)
@@ -269,7 +269,23 @@ def build_game(
         inspection = inspect_game(prepared.root)
         if not inspection.recognized:
             detail = "; ".join(inspection.warnings) or "unrecognized game"
-            raise BuildError(f"Could not identify RPG Maker game: {detail}")
+            raise BuildError(f"Could not identify supported game: {detail}")
+        if inspection.engine is EngineVariant.GODOT:
+            from rpgmframe.godot_backend import GodotBuildError, build_godot_game
+
+            try:
+                return build_godot_game(
+                    source_path=source_path,
+                    output_path=output_path,
+                    inspection=inspection,
+                    runtime=runtime,
+                    force=force,
+                    archive_type=prepared.archive_type,
+                    progress=progress,
+                )
+            except GodotBuildError as exc:
+                raise BuildError(str(exc)) from exc
+
         if inspection.engine in {
             EngineVariant.XP,
             EngineVariant.VX,

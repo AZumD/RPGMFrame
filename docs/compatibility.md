@@ -144,3 +144,30 @@ ARM64 Ubuntu Xenial artifact `11271950906`, verified against SHA256
 `3e0f3d6ed6486b672ed8988c180d2e6fd361622b5015cc245ce9c004ae5e3135`.
 The pin should be refreshed deliberately rather than silently following mkxp-z
 `dev`, so converter behavior remains reproducible.
+
+
+## Godot
+
+Godot exports use a separate backend from both NW.js and mkxp-z.
+
+RPGMFrame treats the Godot PCK header as the source of truth. A standalone PCK
+starts with Godot's `GDPC` magic followed by the pack format and engine
+`major.minor.patch` version. Self-contained Windows exports place equivalent
+pack metadata at the end of the executable, allowing RPGMFrame to locate and
+extract the embedded PCK generically.
+
+The backend requests the exact matching stable Godot release from the official
+`godotengine/godot` GitHub releases. If that release contains
+`linux.arm64`, RPGMFrame downloads it and verifies either the asset's
+published SHA256 digest or the release's SHA512 checksum list before caching
+the binary.
+
+The converted launcher uses Godot's `--main-pack` option rather than
+re-exporting or modifying project files. This keeps the game payload unchanged.
+
+Current conservative boundaries:
+
+- C#/.NET exports are recognized but not automatically converted.
+- Releases without an official Linux ARM64 binary are recognized but not built.
+- Windows native plugins may require Linux ARM64 GDNative/GDExtension builds.
+- Godot support is marked `needs_testing` until validated on Steam Frame hardware.

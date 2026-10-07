@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import shlex
+
 
 _FRAME_ENV_PREAMBLE = r'''#!/usr/bin/env bash
 set -euo pipefail
@@ -66,4 +68,12 @@ exec "$ROOT/nw" "$ROOT" "$@"
 def mkxp_launcher_body() -> str:
     return _FRAME_ENV_PREAMBLE + r'''cd "$ROOT"
 exec "$ROOT/mkxp-z.aarch64" "$@"
+'''
+
+
+
+def godot_launcher_body(pack_relative: str) -> str:
+    pack = shlex.quote(pack_relative)
+    return _FRAME_ENV_PREAMBLE + f'''cd "$ROOT/game"
+exec "$ROOT/godot.arm64" --main-pack "$ROOT"/{pack} "$@"
 '''

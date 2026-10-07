@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "rpgmframe"
 version = "0.0.1"
-description = "Linux ARM64 runtime conversion tooling for RPG Maker games"
+description = "Linux ARM64 runtime conversion tooling for RPG Maker and Godot games"
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [

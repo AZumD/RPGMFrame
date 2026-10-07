@@ -21,6 +21,7 @@ _PORTABLE_EXECUTABLES = frozenset(
         "chrome_crashpad_handler",
         "chrome-sandbox",
         "mkxp-z.aarch64",
+        "godot.arm64",
     }
 )
 

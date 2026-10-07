@@ -26,7 +26,7 @@ from rpgmframe.source import SourceError
 
 
 APP_NAME = "RPGMFrame"
-APP_TAG = "RPG Maker XP / VX / VX Ace / MV / MZ → Steam Frame (Linux ARM64)"
+APP_TAG = "RPG Maker + Godot → Steam Frame (Linux ARM64)"
 
 C_BG = "#07111f"
 C_PANEL = "#12233a"
@@ -46,12 +46,12 @@ FRAME_INSTRUCTIONS = """Copy the generated .tar.gz to your Steam Frame, then:
 mkdir -p ~/Games
 tar -xzf GAME-linux-aarch64.tar.gz -C ~/Games
 cd ~/Games/GAME-frame
-chmod +x launch.sh nw mkxp-z.aarch64 chrome_crashpad_handler 2>/dev/null || true
+chmod +x launch.sh nw mkxp-z.aarch64 godot.arm64 chrome_crashpad_handler 2>/dev/null || true
 ./launch.sh
 
-RPGMFrame packages the matching native Linux ARM64 runtime: NW.js for MV/MZ or
-mkxp-z for XP/VX/VX Ace. First use downloads the pinned runtime; later builds
-reuse the local cache.
+RPGMFrame packages the matching native Linux ARM64 runtime: NW.js for MV/MZ,
+mkxp-z for XP/VX/VX Ace, or the matching official Godot ARM64 build. First use
+downloads the runtime; later builds reuse the local cache.
 """
 
 ctk: Any = None
@@ -202,7 +202,7 @@ class ConverterApp:
 
         self.drop_label = ctk.CTkLabel(
             self.drop,
-            text="Drop an RPG Maker XP / VX / VX Ace / MV / MZ game folder or .zip here",
+            text="Drop an RPG Maker or Godot game folder / .zip here",
             font=ctk.CTkFont(size=20, weight="bold"),
             text_color=C_TEXT,
         )
@@ -533,10 +533,14 @@ class ConverterApp:
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _configure_runtime_for_engine(self, engine: str) -> None:
-        if engine in {"xp", "vx", "vxace"}:
+    def _configure_runtime_for_engine(self, summary: InspectionSummary) -> None:
+        if summary.engine in {"xp", "vx", "vxace"}:
             self.runtime_label.configure(text="mkxp-z")
             self.runtime_var.set(DEFAULT_MKXPZ_REVISION)
+            self.runtime_entry.configure(state="disabled")
+        elif summary.engine == "godot":
+            self.runtime_label.configure(text="Godot")
+            self.runtime_var.set(summary.engine_version or "detected from PCK")
             self.runtime_entry.configure(state="disabled")
         else:
             self.runtime_label.configure(text="NW.js")
@@ -546,12 +550,17 @@ class ConverterApp:
     def _show_inspection(self, summary: InspectionSummary) -> None:
         self._inspection_buildable = summary_is_buildable(summary)
         if summary.recognized:
-            self._configure_runtime_for_engine(summary.engine)
-            name = summary.game_name or (self.source.name if self.source else "RPG Maker game")
+            self._configure_runtime_for_engine(summary)
+            name = summary.game_name or (self.source.name if self.source else "game")
             version = f" {summary.engine_version}" if summary.engine_version else ""
+            engine_name = (
+                f"Godot{version}"
+                if summary.engine == "godot"
+                else f"RPG Maker {summary.engine.upper()}{version}"
+            )
             self.game_name_label.configure(text=name)
             self.engine_label.configure(
-                text=f"Engine: RPG Maker {summary.engine.upper()}{version}",
+                text=f"Engine: {engine_name}",
                 text_color=C_TEXT,
             )
             self.compat_label.configure(
@@ -562,12 +571,17 @@ class ConverterApp:
                 self.drop_label.configure(text="Ready to convert")
                 if not self._busy:
                     self.convert_btn.configure(state="normal")
-                self._set_status(f"Detected RPG Maker {summary.engine.upper()}", C_TEAL)
+                detected = (
+                    f"Godot {summary.engine_version}"
+                    if summary.engine == "godot"
+                    else f"RPG Maker {summary.engine.upper()}"
+                )
+                self._set_status(f"Detected {detected}", C_TEAL)
             else:
                 self.drop_label.configure(text="Detected, but not buildable yet")
                 self.convert_btn.configure(state="disabled")
                 self._set_status(
-                    f"RPG Maker {summary.engine.upper()} support is not buildable yet",
+                    f"{summary.engine.upper()} support is not buildable yet",
                     C_ERR,
                 )
             for warning in summary.warnings:
@@ -578,7 +592,7 @@ class ConverterApp:
             self.convert_btn.configure(state="disabled")
             self.engine_label.configure(text="Engine: not recognized", text_color=C_ERR)
             self.compat_label.configure(text="Compatibility: unknown", text_color=C_ERR)
-            self._set_status("No supported RPG Maker game detected", C_ERR)
+            self._set_status("No supported RPG Maker or Godot game detected", C_ERR)
 
     def _show_inspection_error(self, error: str) -> None:
         self._inspection_buildable = False
@@ -599,14 +613,14 @@ class ConverterApp:
 
     def _browse(self) -> None:
         path = filedialog.askopenfilename(
-            title="Select RPG Maker ZIP (Cancel to pick a folder)",
+            title="Select game ZIP (Cancel to pick a folder)",
             filetypes=[("ZIP archive", "*.zip"), ("All files", "*.*")],
         )
         if path:
             self._set_source(Path(path))
             return
 
-        folder = filedialog.askdirectory(title="Select RPG Maker game folder")
+        folder = filedialog.askdirectory(title="Select game folder")
         if folder:
             self._set_source(Path(folder))
 
@@ -638,7 +652,7 @@ class ConverterApp:
         if self.source is None:
             messagebox.showinfo(
                 APP_NAME,
-                "Drop or browse to an RPG Maker game folder or ZIP first.",
+                "Drop or browse to a supported game folder or ZIP first.",
             )
             return
         if not self._inspection_buildable:
@@ -650,7 +664,7 @@ class ConverterApp:
 
         runtime_version = self.runtime_var.get().strip()
         if not runtime_version:
-            messagebox.showinfo(APP_NAME, "Enter an NW.js runtime version.")
+            messagebox.showinfo(APP_NAME, "Runtime version could not be determined.")
             return
 
         source = self.source
@@ -699,8 +713,13 @@ class ConverterApp:
         name = result.game_name or result.output_path.name
         version = f" {result.engine_version}" if result.engine_version else ""
         self.game_name_label.configure(text=name)
+        engine_name = (
+            f"Godot{version}"
+            if result.engine.value == "godot"
+            else f"RPG Maker {result.engine.value.upper()}{version}"
+        )
         self.engine_label.configure(
-            text=f"Engine: RPG Maker {result.engine.value.upper()}{version}",
+            text=f"Engine: {engine_name}",
             text_color=C_TEXT,
         )
         self.compat_label.configure(

@@ -114,3 +114,31 @@ def test_summary_is_buildable_only_for_supported_current_backends() -> None:
     assert summary_is_buildable(mv)
     assert not summary_is_buildable(unknown)
     assert summary_is_buildable(future_xp)
+
+
+def test_summary_buildability_for_godot() -> None:
+    from rpgmframe.gui_support import InspectionSummary
+
+    godot = InspectionSummary(
+        recognized=True,
+        engine="godot",
+        engine_version="4.3.0",
+        game_name="Godot Game",
+        confidence="high",
+        compatibility="needs_testing",
+        warnings=(),
+        evidence=("Game.pck",),
+    )
+    godot_csharp = InspectionSummary(
+        recognized=True,
+        engine="godot",
+        engine_version="4.3.0",
+        game_name="Godot CSharp",
+        confidence="high",
+        compatibility="unknown",
+        warnings=("C#/.NET export detected",),
+        evidence=("Game.pck",),
+    )
+
+    assert summary_is_buildable(godot)
+    assert not summary_is_buildable(godot_csharp)

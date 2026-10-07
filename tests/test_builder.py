@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import struct
 import zipfile
 from pathlib import Path
 
@@ -399,3 +400,54 @@ def test_builds_rpg_maker_xp_with_arm64_mkxpz(tmp_path: Path) -> None:
     launcher = (output / "launch.sh").read_text(encoding="utf-8")
     assert "plasmashell" in launcher
     assert 'exec "$ROOT/mkxp-z.aarch64" "$@"' in launcher
+
+
+def test_builds_godot_pck_with_supplied_arm64_runtime(tmp_path: Path) -> None:
+    from rpgmframe.godot import PCK_MAGIC
+
+    source = tmp_path / "godot"
+    source.mkdir()
+    pck = struct.pack("<IIIII", PCK_MAGIC, 3, 4, 3, 0) + b"fixture"
+    (source / "Tiny Game.pck").write_bytes(pck)
+    (source / "Tiny Game.exe").write_bytes(b"windows binary")
+
+    runtime = tmp_path / "godot-runtime"
+    _write_elf(runtime / "godot.arm64", 183)
+
+    output = tmp_path / "built"
+    result = build_game(source, runtime=runtime, output=output)
+
+    assert result.success
+    assert result.engine is EngineVariant.GODOT
+    assert result.engine_version == "4.3.0"
+    assert result.runtime_architecture == "aarch64"
+    assert (output / "godot.arm64").is_file()
+    assert (output / "game/Tiny Game.pck").read_bytes() == pck
+    assert not (output / "game/Tiny Game.exe").exists()
+
+    launcher = (output / "launch.sh").read_text(encoding="utf-8")
+    assert "--main-pack" in launcher
+    assert "Tiny Game.pck" in launcher
+    assert "plasmashell" in launcher
+
+
+def test_builds_embedded_godot_export_by_extracting_pck(tmp_path: Path) -> None:
+    from rpgmframe.godot import PCK_MAGIC
+
+    source = tmp_path / "godot-embedded"
+    source.mkdir()
+    pck = struct.pack("<IIIII", PCK_MAGIC, 3, 4, 2, 2) + b"payload"
+    exe = source / "Embedded Game.exe"
+    exe.write_bytes(
+        b"MZ" + b"\0" * 62 + pck + struct.pack("<QI", len(pck), PCK_MAGIC)
+    )
+
+    runtime = tmp_path / "godot-runtime"
+    _write_elf(runtime / "godot.arm64", 183)
+
+    output = tmp_path / "built"
+    result = build_game(source, runtime=runtime, output=output)
+
+    assert result.engine is EngineVariant.GODOT
+    assert (output / "game/Embedded Game.pck").read_bytes() == pck
+    assert not (output / "game/Embedded Game.exe").exists()

@@ -1,6 +1,6 @@
 # RPGMFrame
 
-Experimental Linux ARM64 runtime-conversion toolkit for RPG Maker games, initially targeting the Steam Frame.
+Experimental Linux ARM64 runtime-conversion toolkit for RPG Maker and Godot games, initially targeting the Steam Frame.
 
 RPGMFrame is intentionally separate from [RenFrame](https://github.com/AZumD/RenFrame) while the RPG Maker runtime model is still being explored. If both projects stabilize around the same abstractions, they can later become backends of a shared converter.
 
@@ -8,15 +8,16 @@ RPGMFrame is intentionally separate from [RenFrame](https://github.com/AZumD/Ren
 
 RPGMFrame can:
 
-- detect RPG Maker XP, VX, VX Ace, MV, and MZ game directories
+- detect RPG Maker XP, VX, VX Ace, MV, MZ, and Godot game exports
 - report engine, confidence, evidence, title, payload root, and RPG Maker version
 - auto-descend through unambiguous chains of extracted archive wrapper directories
 - build **RPG Maker XP / VX / VX Ace** games around Linux ARM64 mkxp-z
 - build **RPG Maker MV** games around Linux ARM64 NW.js
 - build **RPG Maker MZ** games around Linux ARM64 NW.js
+- build **Godot** Windows exports around the exact matching official Linux ARM64 Godot runtime when an ARM64 release exists
 - build directly from `.zip` downloads without manual extraction
 - optionally package completed builds as portable `.tar.gz` archives
-- automatically download, SHA256-verify, and cache the pinned NW.js ARM64 runtime
+- automatically download, verify, and cache the required ARM64 runtimes
 - accept a manually supplied NW.js runtime as an override
 - validate that the NW.js `nw` binary is actually AArch64
 - repair an empty NW.js package name while preserving game-specific package settings
@@ -28,13 +29,13 @@ RPGMFrame can:
 - apply the upstream MV negative-frame-skip fix when an older vulnerable core is detected
 - provide a RenFrame-style desktop GUI with drag/drop, inspection, conversion progress, and transfer packaging
 
-The XP/VX/VX Ace mkxp-z path is newly enabled and still needs Steam Frame hardware validation. The MV runtime-swap path has been validated on Steam Frame hardware with an RPG Maker MV 1.6.1 game.
+The XP/VX/VX Ace mkxp-z and Godot paths are newly enabled and still need Steam Frame hardware validation. The MV runtime-swap path has been validated on Steam Frame hardware with an RPG Maker MV 1.6.1 game.
 
 Both MV and MZ runtime-swap paths have now been validated on Steam Frame hardware. MV was validated with Jailbreak (RPG Maker MV 1.6.1) and with OMORI 1.0.8d (RPG Maker MV 1.6.1), using a clean RPGMFrame build with no hand-edits to the converted output. MZ was validated with Look Outside 0.30 (RPG Maker MZ 1.8.1), including gameplay, controller input, audio, menus/settings, save/load, and relaunch.
 
 OMORI is intentionally treated as a compatibility stress test rather than a game-specific target. The fixes learned from it are implemented as generic Windows/NW.js-to-Linux behavior. See [Compatibility notes](docs/compatibility.md).
 
-The MV/MZ backend pins **NW.js 0.117.0**, the version currently validated on Steam Frame. The XP/VX/VX Ace backend pins an upstream mkxp-z Linux ARM64 CI artifact and verifies its SHA256 before caching it. Use `--runtime-version` to test another NW.js release or `--runtime` to supply an extracted runtime directly for either backend.
+The MV/MZ backend pins **NW.js 0.117.0**, the version currently validated on Steam Frame. The XP/VX/VX Ace backend pins an upstream mkxp-z Linux ARM64 CI artifact. The Godot backend reads the exact engine version from the PCK header and resolves the matching official Linux ARM64 Godot release. Downloads are checksum-verified before caching. Use `--runtime-version` to test another NW.js release or `--runtime` to supply an extracted runtime directly.
 
 ## Development
 
@@ -161,3 +162,32 @@ case-insensitive path cache, and preserves renamed executable/archive stems via
 The mkxp-z backend is currently marked `needs_testing` until it has been
 validated on Steam Frame hardware. mkxp-z itself documents Linux ARM support,
 and its upstream CI produces an ARM64 Linux artifact.
+
+
+### Godot backend
+
+Godot is handled as a third runtime family. RPGMFrame recognizes standalone
+`.pck` exports by the `GDPC` pack header and reads the pack format plus the
+engine's exact `major.minor.patch` version directly from the PCK header.
+
+Self-contained Windows exports are supported too. If the PCK is embedded in the
+`.exe`, RPGMFrame uses Godot's own end-of-file pack footer to locate and
+extract the embedded PCK without modifying the source executable.
+
+For a normal GDScript/native export the conversion path is intentionally small:
+
+1. identify the main PCK
+2. read its exact Godot version
+3. resolve the matching official `Godot_vVERSION_linux.arm64.zip` release
+4. verify GitHub's SHA256 digest, or older releases' `SHA512-SUMS.txt`
+5. package the ARM64 Godot binary with the original game payload
+6. launch it with `--main-pack` through the normal FrameTop-aware launcher
+
+Godot releases that do not provide an official Linux ARM64 binary are
+recognized but fail cleanly instead of silently substituting another engine
+version.
+
+C#/.NET exports are detected but intentionally not converted yet. Their managed
+and native runtime bundle is platform-specific, so treating them like a plain
+PCK swap would overstate compatibility. Native GDNative/GDExtension plugins can
+also require Linux ARM64 builds of the game's plugin libraries.

@@ -45,6 +45,7 @@ def test_create_tar_gz_restores_linux_execute_bits_from_non_posix_source(
         "chrome_crashpad_handler",
         "chrome-sandbox",
         "mkxp-z.aarch64",
+        "godot.arm64",
     ):
         path = build / name
         path.write_bytes(b"placeholder")
@@ -68,6 +69,7 @@ def test_create_tar_gz_restores_linux_execute_bits_from_non_posix_source(
             "game-frame/chrome_crashpad_handler",
             "game-frame/chrome-sandbox",
             "game-frame/mkxp-z.aarch64",
+            "game-frame/godot.arm64",
             "game-frame/tools/post-install.sh",
         ):
             assert tar.getmember(name).mode & 0o111
