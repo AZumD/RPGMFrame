@@ -8,6 +8,7 @@ from rpgmframe.gui_support import (
     inspect_source_summary,
     output_path_for_source,
     source_base_name,
+    summary_is_buildable,
 )
 
 
@@ -74,3 +75,42 @@ def test_inspect_source_summary_for_zip(tmp_path: Path) -> None:
     assert summary.recognized
     assert summary.engine == "mv"
     assert summary.game_name == "GUI Fixture"
+
+
+def test_summary_is_buildable_only_for_supported_current_backends() -> None:
+    from rpgmframe.gui_support import InspectionSummary
+
+    mv = InspectionSummary(
+        recognized=True,
+        engine="mv",
+        engine_version="1.6.1",
+        game_name="MV",
+        confidence="high",
+        compatibility="supported",
+        warnings=(),
+        evidence=(),
+    )
+    unknown = InspectionSummary(
+        recognized=False,
+        engine="unknown",
+        engine_version=None,
+        game_name=None,
+        confidence="low",
+        compatibility="unknown",
+        warnings=(),
+        evidence=(),
+    )
+    future_xp = InspectionSummary(
+        recognized=True,
+        engine="xp",
+        engine_version=None,
+        game_name="XP",
+        confidence="high",
+        compatibility="planned",
+        warnings=(),
+        evidence=(),
+    )
+
+    assert summary_is_buildable(mv)
+    assert not summary_is_buildable(unknown)
+    assert not summary_is_buildable(future_xp)

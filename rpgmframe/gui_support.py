@@ -98,3 +98,12 @@ def build_for_gui(
         else None
     )
     return GuiBuildOutcome(build=result, archive_path=archive_path)
+
+
+def summary_is_buildable(summary: InspectionSummary) -> bool:
+    """Return whether the current backend can convert this inspected game."""
+    return (
+        summary.recognized
+        and summary.engine in {"mv", "mz"}
+        and summary.compatibility == "supported"
+    )

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import queue
 import subprocess
 import sys
 import threading
@@ -16,6 +17,7 @@ from rpgmframe.gui_support import (
     build_for_gui,
     inspect_source_summary,
     output_path_for_source,
+    summary_is_buildable,
 )
 from rpgmframe.packaging import PackagingError
 from rpgmframe.runtime import DEFAULT_NWJS_VERSION
@@ -144,10 +146,13 @@ class ConverterApp:
 
         self._busy = False
         self._inspection_generation = 0
+        self._inspection_buildable = False
+        self._ui_queue: queue.Queue[Any] = queue.Queue()
         self.archive_var = tk.BooleanVar(value=True)
         self.force_var = tk.BooleanVar(value=False)
         self.runtime_var = tk.StringVar(value=DEFAULT_NWJS_VERSION)
         self._build_ui()
+        self.root.after(25, self._drain_ui_queue)
 
     def _build_ui(self) -> None:
         ctk.CTkFrame(
@@ -234,6 +239,7 @@ class ConverterApp:
         self.convert_btn = ctk.CTkButton(
             controls,
             text="Convert",
+            state="disabled",
             width=168,
             height=42,
             corner_radius=10,
@@ -431,19 +437,40 @@ class ConverterApp:
         )
         self.status.pack(anchor="w", padx=28, pady=(0, 14))
 
+    def _dispatch_ui(self, callback) -> None:
+        """Run Tk work on the main thread without calling Tk from workers."""
+        if threading.current_thread() is threading.main_thread():
+            callback()
+        else:
+            self._ui_queue.put(callback)
+
+    def _drain_ui_queue(self) -> None:
+        try:
+            while True:
+                callback = self._ui_queue.get_nowait()
+                callback()
+        except queue.Empty:
+            pass
+        try:
+            self.root.after(25, self._drain_ui_queue)
+        except Exception:
+            # The window is shutting down.
+            pass
+
     def _append_log(self, message: str) -> None:
-        self.root.after(
-            0,
-            lambda: (
+        self._dispatch_ui(
+            lambda message=message: (
                 self.log_box.insert("end", message + "\n"),
                 self.log_box.see("end"),
-            ),
+            )
         )
 
     def _set_status(self, message: str, color: str = C_MUTED) -> None:
-        self.root.after(
-            0,
-            lambda: self.status.configure(text=message, text_color=color),
+        self._dispatch_ui(
+            lambda message=message, color=color: self.status.configure(
+                text=message,
+                text_color=color,
+            )
         )
 
     def _set_busy(self, busy: bool) -> None:
@@ -452,7 +479,8 @@ class ConverterApp:
             self.convert_btn.configure(state="disabled", text="Working…")
             self.progress.start()
         else:
-            self.convert_btn.configure(state="normal", text="Convert")
+            state = "normal" if self._inspection_buildable else "disabled"
+            self.convert_btn.configure(state=state, text="Convert")
             self.progress.stop()
 
     def _set_source(self, path: Path) -> None:
@@ -468,8 +496,10 @@ class ConverterApp:
             return
 
         self.source = source
+        self._inspection_buildable = False
+        self.convert_btn.configure(state="disabled", text="Convert")
         self.path_label.configure(text=str(source), text_color=C_TEAL)
-        self.drop_label.configure(text="Ready to convert")
+        self.drop_label.configure(text="Inspecting game…")
         self.drop.configure(border_color=C_TEAL)
         self.game_name_label.configure(text=source.stem if source.is_file() else source.name)
         self.engine_label.configure(text="Engine: inspecting…")
@@ -486,21 +516,21 @@ class ConverterApp:
                 summary = inspect_source_summary(source)
             except Exception as exc:
                 if generation == self._inspection_generation:
-                    self.root.after(
-                        0,
-                        lambda: self._show_inspection_error(str(exc)),
+                    error = str(exc)
+                    self._dispatch_ui(
+                        lambda error=error: self._show_inspection_error(error)
                     )
                 return
 
             if generation == self._inspection_generation:
-                self.root.after(
-                    0,
-                    lambda: self._show_inspection(summary),
+                self._dispatch_ui(
+                    lambda summary=summary: self._show_inspection(summary)
                 )
 
         threading.Thread(target=worker, daemon=True).start()
 
     def _show_inspection(self, summary: InspectionSummary) -> None:
+        self._inspection_buildable = summary_is_buildable(summary)
         if summary.recognized:
             name = summary.game_name or (self.source.name if self.source else "RPG Maker game")
             version = f" {summary.engine_version}" if summary.engine_version else ""
@@ -513,15 +543,32 @@ class ConverterApp:
                 text=f"Compatibility: {summary.compatibility}  ·  confidence {summary.confidence}",
                 text_color=C_OK if summary.compatibility == "supported" else C_TEAL,
             )
-            self._set_status(f"Detected RPG Maker {summary.engine.upper()}", C_TEAL)
+            if self._inspection_buildable:
+                self.drop_label.configure(text="Ready to convert")
+                if not self._busy:
+                    self.convert_btn.configure(state="normal")
+                self._set_status(f"Detected RPG Maker {summary.engine.upper()}", C_TEAL)
+            else:
+                self.drop_label.configure(text="Detected, but not buildable yet")
+                self.convert_btn.configure(state="disabled")
+                self._set_status(
+                    f"RPG Maker {summary.engine.upper()} support is not buildable yet",
+                    C_ERR,
+                )
             for warning in summary.warnings:
                 self._append_log("Inspect: " + warning)
         else:
+            self._inspection_buildable = False
+            self.drop_label.configure(text="Engine not supported yet")
+            self.convert_btn.configure(state="disabled")
             self.engine_label.configure(text="Engine: not recognized", text_color=C_ERR)
             self.compat_label.configure(text="Compatibility: unknown", text_color=C_ERR)
             self._set_status("No supported RPG Maker MV/MZ game detected", C_ERR)
 
     def _show_inspection_error(self, error: str) -> None:
+        self._inspection_buildable = False
+        self.drop_label.configure(text="Inspection failed")
+        self.convert_btn.configure(state="disabled")
         self.engine_label.configure(text="Engine: inspection failed", text_color=C_ERR)
         self.compat_label.configure(text="Compatibility: unknown", text_color=C_ERR)
         self._set_status("Inspection failed", C_ERR)
@@ -579,6 +626,12 @@ class ConverterApp:
                 "Drop or browse to an RPG Maker game folder or ZIP first.",
             )
             return
+        if not self._inspection_buildable:
+            messagebox.showinfo(
+                APP_NAME,
+                "This game is not buildable by the currently supported engine backends yet.",
+            )
+            return
 
         runtime_version = self.runtime_var.get().strip()
         if not runtime_version:
@@ -610,16 +663,15 @@ class ConverterApp:
                     progress=self._append_log,
                 )
             except (BuildError, PackagingError, SourceError) as exc:
-                self.root.after(0, lambda: self._fail(str(exc)))
+                error = str(exc)
+                self._dispatch_ui(lambda error=error: self._fail(error))
                 return
             except Exception as exc:
-                self.root.after(
-                    0,
-                    lambda: self._fail(f"Unexpected error: {exc}"),
-                )
+                error = f"Unexpected error: {exc}"
+                self._dispatch_ui(lambda error=error: self._fail(error))
                 return
 
-            self.root.after(0, lambda: self._done(outcome))
+            self._dispatch_ui(lambda outcome=outcome: self._done(outcome))
 
         threading.Thread(target=worker, daemon=True).start()
 
