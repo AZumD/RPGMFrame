@@ -20,6 +20,8 @@ The compatibility layer must not key behavior on a game title, executable name, 
 | Jailbreak | RPG Maker MV 1.6.1 | Working on Steam Frame | Initial MV runtime-swap validation |
 | Look Outside 0.30 | RPG Maker MZ 1.8.1 | Working on Steam Frame | Gameplay, controller input, audio, menus/settings, save/load, relaunch |
 | OMORI 1.0.8d | RPG Maker MV 1.6.1 | Working on Steam Frame | Clean converted output after generic compatibility repairs |
+| To the Moon | RPG Maker XP / mkxp-z | Boots to title screen on Steam Frame | Generic legacy mkxp migration + fractional-scale input fixes; deeper gameplay not yet validated |
+| My Girlfriend's Streaming Career 0.39 | Godot | Boots successfully on Steam Frame | Converted output launched without hand-edits; deeper gameplay not yet validated |
 
 "Working" records the tested conversion path and observed gameplay. It is not a promise that every route, plugin, media codec, or optional feature in a game has been exhaustively tested.
 
@@ -170,7 +172,7 @@ Current conservative boundaries:
 - C#/.NET exports are recognized but not automatically converted.
 - Releases without an official Linux ARM64 binary are recognized but not built.
 - Windows native plugins may require Linux ARM64 GDNative/GDExtension builds.
-- Godot support is marked `needs_testing` until validated on Steam Frame hardware.
+- Godot support remains marked `needs_testing` pending broader coverage, but a converted Godot title has now booted successfully on Steam Frame hardware without hand-edits.
 
 
 ### mkxp-z migration and fractional-scale input

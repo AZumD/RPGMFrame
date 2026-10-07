@@ -29,7 +29,7 @@ RPGMFrame can:
 - apply the upstream MV negative-frame-skip fix when an older vulnerable core is detected
 - provide a RenFrame-style desktop GUI with drag/drop, inspection, conversion progress, and transfer packaging
 
-The XP/VX/VX Ace mkxp-z and Godot paths are newly enabled and still need Steam Frame hardware validation. The MV runtime-swap path has been validated on Steam Frame hardware with an RPG Maker MV 1.6.1 game.
+The XP/VX/VX Ace mkxp-z path and the Godot path have now both booted converted titles successfully on Steam Frame hardware. They still need broader gameplay and title coverage before being treated as fully validated. The MV runtime-swap path has been validated on Steam Frame hardware with an RPG Maker MV 1.6.1 game.
 
 Both MV and MZ runtime-swap paths have now been validated on Steam Frame hardware. MV was validated with Jailbreak (RPG Maker MV 1.6.1) and with OMORI 1.0.8d (RPG Maker MV 1.6.1), using a clean RPGMFrame build with no hand-edits to the converted output. MZ was validated with Look Outside 0.30 (RPG Maker MZ 1.8.1), including gameplay, controller input, audio, menus/settings, save/load, and relaunch.
 
