@@ -11,6 +11,30 @@ class PackagingError(RuntimeError):
     """Raised when a completed build cannot be packaged."""
 
 
+# Windows filesystems do not preserve POSIX execute bits. These files are
+# created/copied by RPGMFrame specifically to be executed after extraction on
+# Linux, so normalize their archive metadata independently of the host OS.
+_PORTABLE_EXECUTABLES = frozenset(
+    {
+        "launch.sh",
+        "nw",
+        "chrome_crashpad_handler",
+        "chrome-sandbox",
+    }
+)
+
+
+def _portable_tar_filter(info: tarfile.TarInfo) -> tarfile.TarInfo:
+    relative = Path(info.name)
+    if info.isfile():
+        name = relative.name
+        # launch.sh and the Linux NW.js helpers live at the converted package
+        # root. Shell helpers are executable wherever RPGMFrame adds them.
+        if name in _PORTABLE_EXECUTABLES or name.endswith(".sh"):
+            info.mode |= 0o111
+    return info
+
+
 def default_archive_path(build_directory: Path) -> Path:
     name = build_directory.name
     base = name[:-6] if name.endswith("-frame") else name
@@ -43,7 +67,12 @@ def create_tar_gz(
     temporary = archive.parent / f".{archive.name}.tmp-{uuid.uuid4().hex[:8]}"
     try:
         with tarfile.open(temporary, "w:gz", format=tarfile.PAX_FORMAT) as tar:
-            tar.add(source, arcname=source.name, recursive=True)
+            tar.add(
+                source,
+                arcname=source.name,
+                recursive=True,
+                filter=_portable_tar_filter,
+            )
 
         if archive.exists():
             archive.unlink()

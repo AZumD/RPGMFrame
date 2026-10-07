@@ -33,6 +33,41 @@ def test_create_tar_gz_contains_build_root_and_launcher(tmp_path: Path) -> None:
         assert launcher_member.mode & 0o111
 
 
+def test_create_tar_gz_restores_linux_execute_bits_from_non_posix_source(
+    tmp_path: Path,
+) -> None:
+    build = tmp_path / "game-frame"
+    build.mkdir()
+
+    for name in ("launch.sh", "nw", "chrome_crashpad_handler", "chrome-sandbox"):
+        path = build / name
+        path.write_bytes(b"placeholder")
+        path.chmod(0o644)
+
+    helper = build / "tools" / "post-install.sh"
+    helper.parent.mkdir()
+    helper.write_text("#!/bin/sh\n", encoding="utf-8")
+    helper.chmod(0o644)
+
+    data = build / "package.json"
+    data.write_text("{}", encoding="utf-8")
+    data.chmod(0o644)
+
+    archive = create_tar_gz(build)
+
+    with tarfile.open(archive, "r:gz") as tar:
+        for name in (
+            "game-frame/launch.sh",
+            "game-frame/nw",
+            "game-frame/chrome_crashpad_handler",
+            "game-frame/chrome-sandbox",
+            "game-frame/tools/post-install.sh",
+        ):
+            assert tar.getmember(name).mode & 0o111
+
+        assert not (tar.getmember("game-frame/package.json").mode & 0o111)
+
+
 def test_create_tar_gz_refuses_existing_archive_without_force(tmp_path: Path) -> None:
     build = tmp_path / "game-frame"
     build.mkdir()
