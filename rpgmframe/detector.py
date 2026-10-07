@@ -372,13 +372,21 @@ def inspect_game(path: Path | str) -> GameInspection:
         runner_up = candidates[1]
         if runner_up.score == best.score and runner_up.engine is not best.engine:
             evidence = list(dict.fromkeys(best.evidence + runner_up.evidence))
+            engines = {best.engine, runner_up.engine}
+            if engines == {EngineVariant.MV, EngineVariant.MZ}:
+                warning = (
+                    "Conflicting MV and MZ engine signatures have equal "
+                    "confidence; refusing to guess."
+                )
+            else:
+                warning = (
+                    "Conflicting RPG Maker generation signatures have equal "
+                    "confidence; refusing to guess."
+                )
             return GameInspection(
                 source_path=root,
                 evidence=evidence,
-                warnings=[
-                    "Conflicting RPG Maker generation signatures have equal "
-                    "confidence; refusing to guess."
-                ],
+                warnings=[warning],
             )
 
     warnings: list[str] = []
