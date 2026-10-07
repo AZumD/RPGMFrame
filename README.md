@@ -24,6 +24,7 @@ RPGMFrame can:
 - preserve game-owned package-root companion files while dropping the old Windows NW.js runtime
 - inject a generic case-insensitive Linux path compatibility shim for browser assets and Node fs reads
 - repair a missing MV fpsmeter.js include when the core requires it and the shipped library is present
+- apply the upstream MV negative-frame-skip fix when an older vulnerable core is detected
 - provide a RenFrame-style desktop GUI with drag/drop, inspection, conversion progress, and transfer packaging
 
 The MV runtime-swap path has been validated on Steam Frame hardware with an RPG Maker MV 1.6.1 game.

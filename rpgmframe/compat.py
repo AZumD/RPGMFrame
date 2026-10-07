@@ -337,6 +337,40 @@ def _inject_script(index_html: Path, script_ref: str) -> bool:
     return True
 
 
+def _repair_mv_negative_skipcount(payload_root: Path) -> bool:
+    """
+    Apply the upstream RPG Maker MV render-freeze fix when the old core is present.
+
+    Older MV cores only render when Graphics._skipCount is exactly zero. If a
+    clock adjustment makes the calculated skip count negative, the renderer can
+    remain skipped indefinitely while game logic/audio continue. The upstream
+    CoreScript fix changes the comparison to <= 0.
+    """
+    core = payload_root / "js" / "rpg_core.js"
+    if not core.is_file():
+        return False
+
+    try:
+        core_text = core.read_text(encoding="utf-8-sig", errors="ignore")
+    except OSError:
+        return False
+
+    old = "if (this._skipCount === 0) {"
+    new = "if (this._skipCount <= 0) {"
+
+    # Stay conservative: patch only the exact known old CoreScript expression,
+    # and only when it appears once.
+    if core_text.count(old) != 1:
+        return False
+
+    core.write_text(
+        core_text.replace(old, new, 1),
+        encoding="utf-8",
+        newline="\n",
+    )
+    return True
+
+
 def _repair_mv_fpsmeter(payload_root: Path) -> bool:
     core = payload_root / "js" / "rpg_core.js"
     index_html = payload_root / "index.html"
@@ -421,6 +455,12 @@ def install_compatibility(
         warnings.append(
             "Installed generic Linux compatibility shim for case-insensitive "
             "game asset and Node fs reads"
+        )
+
+    if engine is EngineVariant.MV and _repair_mv_negative_skipcount(payload_root):
+        warnings.append(
+            "Applied upstream RPG Maker MV render-freeze fix for negative "
+            "Graphics._skipCount"
         )
 
     if engine is EngineVariant.MV and _repair_mv_fpsmeter(payload_root):

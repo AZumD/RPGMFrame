@@ -319,3 +319,42 @@ def test_case_compatibility_does_not_rename_source_assets(tmp_path: Path) -> Non
 
     assert (output / "www/img/pictures/leaf.png").is_file()
     assert not (output / "www/img/pictures/Leaf.png").exists()
+
+
+def test_repairs_old_mv_negative_skipcount_freeze_bug(tmp_path: Path) -> None:
+    source = _mv_game(tmp_path / "source")
+    wrapper = source / "jailbreak_win"
+    core = wrapper / "www/js/rpg_core.js"
+    core.write_text(
+        core.read_text(encoding="utf-8")
+        + "\nif (this._skipCount === 0) {\n    this._skipCount = 0;\n}\n",
+        encoding="utf-8",
+    )
+
+    runtime = _runtime(tmp_path / "nwjs")
+    output = tmp_path / "built"
+    result = build_game(source, runtime=runtime, output=output)
+
+    built_core = (output / "www/js/rpg_core.js").read_text(encoding="utf-8")
+    assert "if (this._skipCount <= 0) {" in built_core
+    assert "if (this._skipCount === 0) {" not in built_core
+    assert any("render-freeze fix" in warning for warning in result.warnings)
+
+
+def test_does_not_rewrite_mv_skipcount_when_already_fixed(tmp_path: Path) -> None:
+    source = _mv_game(tmp_path / "source")
+    wrapper = source / "jailbreak_win"
+    core = wrapper / "www/js/rpg_core.js"
+    core.write_text(
+        core.read_text(encoding="utf-8")
+        + "\nif (this._skipCount <= 0) {\n    this._skipCount = 0;\n}\n",
+        encoding="utf-8",
+    )
+
+    runtime = _runtime(tmp_path / "nwjs")
+    output = tmp_path / "built"
+    result = build_game(source, runtime=runtime, output=output)
+
+    built_core = (output / "www/js/rpg_core.js").read_text(encoding="utf-8")
+    assert built_core.count("if (this._skipCount <= 0) {") == 1
+    assert not any("render-freeze fix" in warning for warning in result.warnings)

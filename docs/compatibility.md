@@ -95,3 +95,28 @@ Native Node addons are another boundary. An x86/x64 `.node` binary cannot be mad
 Hardware discoveries should become small synthetic tests wherever possible. Tests should reproduce the compatibility class without including copyrighted game assets or depending on a particular commercial game.
 
 OMORI is useful because it exposed several assumptions at once. The regression suite should remember the assumptions, not OMORI itself.
+
+
+### Old MV negative frame-skip freeze
+
+Older RPG Maker MV cores contain a render-loop bug where
+`Graphics._skipCount` can become negative after a clock adjustment. The old
+core renders only when the value is exactly zero, so a negative value can leave
+the screen frozen indefinitely while game logic and audio continue.
+
+RPGMFrame applies the upstream CoreScript repair only when the copied
+`rpg_core.js` contains the exact vulnerable expression once:
+
+```javascript
+if (this._skipCount === 0) {
+```
+
+It is changed to:
+
+```javascript
+if (this._skipCount <= 0) {
+```
+
+Already-fixed cores are left untouched. This was encountered while validating
+Fear & Hunger, but it is intentionally implemented as an engine-level MV repair
+because the bug exists across older RPG Maker MV games.
