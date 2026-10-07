@@ -20,6 +20,7 @@ _PORTABLE_EXECUTABLES = frozenset(
         "nw",
         "chrome_crashpad_handler",
         "chrome-sandbox",
+        "mkxp-z.aarch64",
     }
 )
 

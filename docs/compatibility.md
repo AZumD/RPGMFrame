@@ -120,3 +120,27 @@ if (this._skipCount <= 0) {
 Already-fixed cores are left untouched. This was encountered while validating
 Fear & Hunger, but it is intentionally implemented as an engine-level MV repair
 because the bug exists across older RPG Maker MV games.
+
+
+## RPG Maker XP / VX / VX Ace through mkxp-z
+
+Classic RGSS games use a different backend from MV/MZ. RPGMFrame detects XP,
+VX, and VX Ace from generation-specific Scripts data, encrypted archive
+extensions, and `[Game]` INI metadata, then packages the game around a Linux
+ARM64 mkxp-z runtime.
+
+The generated `mkxp.json` sets the RGSS generation explicitly and leaves
+mkxp-z's case-insensitive path cache enabled. If a game renamed the stock
+`Game.exe` / `Game.ini` / encrypted archive stem, RPGMFrame derives that stem
+from the matching INI and sets mkxp-z's `execName` rather than renaming the
+user's files.
+
+The backend preserves the complete game payload and does not attempt to rewrite
+Ruby scripts by default. It warns about declared external RTP dependencies and
+WMA assets because those can require additional compatibility work.
+
+The currently pinned mkxp-z runtime is upstream CI revision `37a04d1`, Linux
+ARM64 Ubuntu Xenial artifact `11271950906`, verified against SHA256
+`3e0f3d6ed6486b672ed8988c180d2e6fd361622b5015cc245ce9c004ae5e3135`.
+The pin should be refreshed deliberately rather than silently following mkxp-z
+`dev`, so converter behavior remains reproducible.

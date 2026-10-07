@@ -104,6 +104,6 @@ def summary_is_buildable(summary: InspectionSummary) -> bool:
     """Return whether the current backend can convert this inspected game."""
     return (
         summary.recognized
-        and summary.engine in {"mv", "mz"}
-        and summary.compatibility == "supported"
+        and summary.engine in {"xp", "vx", "vxace", "mv", "mz"}
+        and summary.compatibility in {"supported", "needs_testing"}
     )

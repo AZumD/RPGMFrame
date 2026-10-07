@@ -19,13 +19,14 @@ from rpgmframe.gui_support import (
     output_path_for_source,
     summary_is_buildable,
 )
+from rpgmframe.mkxp_runtime import DEFAULT_MKXPZ_REVISION
 from rpgmframe.packaging import PackagingError
 from rpgmframe.runtime import DEFAULT_NWJS_VERSION
 from rpgmframe.source import SourceError
 
 
 APP_NAME = "RPGMFrame"
-APP_TAG = "RPG Maker MV / MZ → Steam Frame (Linux ARM64)"
+APP_TAG = "RPG Maker XP / VX / VX Ace / MV / MZ → Steam Frame (Linux ARM64)"
 
 C_BG = "#07111f"
 C_PANEL = "#12233a"
@@ -45,11 +46,12 @@ FRAME_INSTRUCTIONS = """Copy the generated .tar.gz to your Steam Frame, then:
 mkdir -p ~/Games
 tar -xzf GAME-linux-aarch64.tar.gz -C ~/Games
 cd ~/Games/GAME-frame
-chmod +x launch.sh nw chrome_crashpad_handler 2>/dev/null || true
+chmod +x launch.sh nw mkxp-z.aarch64 chrome_crashpad_handler 2>/dev/null || true
 ./launch.sh
 
-RPGMFrame packages a native Linux ARM64 NW.js runtime. The first conversion may
-download the pinned runtime; later conversions reuse the local cache.
+RPGMFrame packages the matching native Linux ARM64 runtime: NW.js for MV/MZ or
+mkxp-z for XP/VX/VX Ace. First use downloads the pinned runtime; later builds
+reuse the local cache.
 """
 
 ctk: Any = None
@@ -200,7 +202,7 @@ class ConverterApp:
 
         self.drop_label = ctk.CTkLabel(
             self.drop,
-            text="Drop an RPG Maker MV / MZ game folder or .zip here",
+            text="Drop an RPG Maker XP / VX / VX Ace / MV / MZ game folder or .zip here",
             font=ctk.CTkFont(size=20, weight="bold"),
             text_color=C_TEXT,
         )
@@ -302,13 +304,14 @@ class ConverterApp:
             text_color=C_MUTED,
         ).pack(side="left", padx=(18, 0))
 
-        ctk.CTkLabel(
+        self.runtime_label = ctk.CTkLabel(
             options,
             text="NW.js",
             text_color=C_MUTED,
             font=ctk.CTkFont(size=12),
-        ).pack(side="right", padx=(8, 4))
-        ctk.CTkEntry(
+        )
+        self.runtime_label.pack(side="right", padx=(8, 4))
+        self.runtime_entry = ctk.CTkEntry(
             options,
             width=92,
             height=30,
@@ -316,7 +319,8 @@ class ConverterApp:
             fg_color=C_PANEL,
             border_color=C_BORDER,
             text_color=C_TEXT,
-        ).pack(side="right")
+        )
+        self.runtime_entry.pack(side="right")
 
         self.out_label = ctk.CTkLabel(
             self.root,
@@ -529,9 +533,20 @@ class ConverterApp:
 
         threading.Thread(target=worker, daemon=True).start()
 
+    def _configure_runtime_for_engine(self, engine: str) -> None:
+        if engine in {"xp", "vx", "vxace"}:
+            self.runtime_label.configure(text="mkxp-z")
+            self.runtime_var.set(DEFAULT_MKXPZ_REVISION)
+            self.runtime_entry.configure(state="disabled")
+        else:
+            self.runtime_label.configure(text="NW.js")
+            self.runtime_var.set(DEFAULT_NWJS_VERSION)
+            self.runtime_entry.configure(state="normal")
+
     def _show_inspection(self, summary: InspectionSummary) -> None:
         self._inspection_buildable = summary_is_buildable(summary)
         if summary.recognized:
+            self._configure_runtime_for_engine(summary.engine)
             name = summary.game_name or (self.source.name if self.source else "RPG Maker game")
             version = f" {summary.engine_version}" if summary.engine_version else ""
             self.game_name_label.configure(text=name)
@@ -563,7 +578,7 @@ class ConverterApp:
             self.convert_btn.configure(state="disabled")
             self.engine_label.configure(text="Engine: not recognized", text_color=C_ERR)
             self.compat_label.configure(text="Compatibility: unknown", text_color=C_ERR)
-            self._set_status("No supported RPG Maker MV/MZ game detected", C_ERR)
+            self._set_status("No supported RPG Maker game detected", C_ERR)
 
     def _show_inspection_error(self, error: str) -> None:
         self._inspection_buildable = False
@@ -648,7 +663,7 @@ class ConverterApp:
         self._append_log(
             f"Output: {output_path_for_source(source, output_dir)}"
         )
-        self._append_log(f"NW.js: {runtime_version}")
+        self._append_log(f"{self.runtime_label.cget('text')}: {runtime_version}")
         self._set_busy(True)
         self._set_status("Converting…", C_TEAL)
 

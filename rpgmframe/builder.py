@@ -14,6 +14,7 @@ from typing import Any
 from rpgmframe.compat import install_compatibility
 from rpgmframe.detector import inspect_game
 from rpgmframe.elf import read_elf_architecture
+from rpgmframe.launchers import nwjs_launcher_body
 from rpgmframe.models import BuildResult, EngineVariant
 from rpgmframe.runtime import DEFAULT_NWJS_VERSION, RuntimeManager
 from rpgmframe.source import SourceError, prepare_source
@@ -129,62 +130,7 @@ def _write_package(
 
 
 def _launcher_body() -> str:
-    return r'''#!/usr/bin/env bash
-set -euo pipefail
-
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-import_graphics_env() {
-    local pid="$1"
-    local key value
-    while IFS='=' read -r key value; do
-        case "$key" in
-            DISPLAY|WAYLAND_DISPLAY|XDG_RUNTIME_DIR|XAUTHORITY)
-                export "$key=$value"
-                ;;
-        esac
-    done < <(tr '\0' '\n' < "/proc/$pid/environ")
-}
-
-if command -v pgrep >/dev/null 2>&1; then
-    plasma_pid="$(pgrep -n plasmashell || true)"
-    if [[ -n "$plasma_pid" && -r "/proc/$plasma_pid/environ" ]]; then
-        plasma_runtime="$(
-            tr '\0' '\n' < "/proc/$plasma_pid/environ" |
-                sed -n 's/^XDG_RUNTIME_DIR=//p' |
-                tail -n 1
-        )"
-        plasma_xauth="$(
-            tr '\0' '\n' < "/proc/$plasma_pid/environ" |
-                sed -n 's/^XAUTHORITY=//p' |
-                tail -n 1
-        )"
-
-        if [[ "$plasma_runtime" == */frametop || "$plasma_xauth" == */frametop/* ]]; then
-            import_graphics_env "$plasma_pid"
-        elif [[ -z "${DISPLAY:-}" && -z "${WAYLAND_DISPLAY:-}" ]]; then
-            import_graphics_env "$plasma_pid"
-        fi
-    fi
-fi
-
-if [[ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ]]; then
-    user_bus="/run/user/$(id -u)/bus"
-    if [[ -S "$user_bus" ]]; then
-        export DBUS_SESSION_BUS_ADDRESS="unix:path=$user_bus"
-    fi
-fi
-
-# Windows-authored NW.js plugins frequently expect these environment variables.
-# Map them to their Linux/XDG equivalents only when the caller did not set them.
-export LOCALAPPDATA="${LOCALAPPDATA:-${XDG_DATA_HOME:-$HOME/.local/share}}"
-export APPDATA="${APPDATA:-${XDG_CONFIG_HOME:-$HOME/.config}}"
-export USERPROFILE="${USERPROFILE:-$HOME}"
-
-# Match the working-directory assumption of Windows RPG Maker deployments.
-cd "$ROOT"
-exec "$ROOT/nw" "$ROOT" "$@"
-'''
+    return nwjs_launcher_body()
 
 
 def _write_launcher(root: Path) -> Path:
@@ -324,6 +270,26 @@ def build_game(
         if not inspection.recognized:
             detail = "; ".join(inspection.warnings) or "unrecognized game"
             raise BuildError(f"Could not identify RPG Maker game: {detail}")
+        if inspection.engine in {
+            EngineVariant.XP,
+            EngineVariant.VX,
+            EngineVariant.VX_ACE,
+        }:
+            from rpgmframe.mkxp_backend import MkxpBuildError, build_mkxp_game
+
+            try:
+                return build_mkxp_game(
+                    source_path=source_path,
+                    output_path=output_path,
+                    inspection=inspection,
+                    runtime=runtime,
+                    force=force,
+                    archive_type=prepared.archive_type,
+                    progress=progress,
+                )
+            except MkxpBuildError as exc:
+                raise BuildError(str(exc)) from exc
+
         if inspection.engine not in {EngineVariant.MV, EngineVariant.MZ}:
             raise BuildError(
                 f"Building RPG Maker {inspection.engine.value.upper()} is not enabled yet."

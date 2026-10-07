@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from rpgmframe.builder import BuildError, build_game
+from rpgmframe.models import EngineVariant
 
 
 def _write(path: Path, content: str = "") -> None:
@@ -358,3 +359,43 @@ def test_does_not_rewrite_mv_skipcount_when_already_fixed(tmp_path: Path) -> Non
     built_core = (output / "www/js/rpg_core.js").read_text(encoding="utf-8")
     assert built_core.count("if (this._skipCount <= 0) {") == 1
     assert not any("render-freeze fix" in warning for warning in result.warnings)
+
+
+def test_builds_rpg_maker_xp_with_arm64_mkxpz(tmp_path: Path) -> None:
+    source = tmp_path / "xp"
+    _write(
+        source / "To the Moon.ini",
+        "[Game]\n"
+        "Library=RGSS104E.dll\n"
+        "Scripts=Data\\Scripts.rxdata\n"
+        "Title=To the Moon\n",
+    )
+    _write(source / "To the Moon.rgssad", "encrypted fixture")
+    _write(source / "Audio/BGM/theme.ogg", "audio")
+
+    runtime = tmp_path / "mkxpz"
+    _write_elf(runtime / "mkxp-z.aarch64", 183)
+    _write(runtime / "LICENSE.txt", "GPL")
+    _write(runtime / "stdlib/aarch64-linux/rbconfig.rb", "fixture")
+    _write(runtime / "scripts/preload/mkxp_wrap.rb", "fixture")
+
+    output = tmp_path / "built"
+    result = build_game(source, runtime=runtime, output=output)
+
+    assert result.success
+    assert result.engine is EngineVariant.XP
+    assert result.runtime_architecture == "aarch64"
+    assert (output / "mkxp-z.aarch64").is_file()
+    assert (output / "game/To the Moon.rgssad").is_file()
+    assert (output / "game/To the Moon.ini").is_file()
+    assert (output / "launch.sh").is_file()
+
+    config = json.loads((output / "mkxp.json").read_text(encoding="utf-8"))
+    assert config["gameFolder"] == "game"
+    assert config["rgssVersion"] == 1
+    assert config["execName"] == "To the Moon"
+    assert config["pathCache"] is True
+
+    launcher = (output / "launch.sh").read_text(encoding="utf-8")
+    assert "plasmashell" in launcher
+    assert 'exec "$ROOT/mkxp-z.aarch64" "$@"' in launcher

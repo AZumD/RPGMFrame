@@ -39,7 +39,13 @@ def test_create_tar_gz_restores_linux_execute_bits_from_non_posix_source(
     build = tmp_path / "game-frame"
     build.mkdir()
 
-    for name in ("launch.sh", "nw", "chrome_crashpad_handler", "chrome-sandbox"):
+    for name in (
+        "launch.sh",
+        "nw",
+        "chrome_crashpad_handler",
+        "chrome-sandbox",
+        "mkxp-z.aarch64",
+    ):
         path = build / name
         path.write_bytes(b"placeholder")
         path.chmod(0o644)
@@ -61,6 +67,7 @@ def test_create_tar_gz_restores_linux_execute_bits_from_non_posix_source(
             "game-frame/nw",
             "game-frame/chrome_crashpad_handler",
             "game-frame/chrome-sandbox",
+            "game-frame/mkxp-z.aarch64",
             "game-frame/tools/post-install.sh",
         ):
             assert tar.getmember(name).mode & 0o111

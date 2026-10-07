@@ -1,4 +1,4 @@
-"""Conservative RPG Maker MV/MZ directory detection."""
+"""Conservative RPG Maker generation detection."""
 
 from __future__ import annotations
 
@@ -14,10 +14,25 @@ from rpgmframe.models import (
     EngineVariant,
     GameInspection,
 )
+from rpgmframe.rgss import (
+    archive_suffix_for_engine,
+    choose_rgss_ini,
+    engine_from_archive,
+    engine_from_library,
+    engine_from_scripts,
+    find_rgss_inis,
+    script_suffix_for_engine,
+)
 
 _VERSION_RE = re.compile(
     r"""RPGMAKER_VERSION\s*=\s*["'](?P<version>[^"']+)["']""",
     re.IGNORECASE,
+)
+
+_LEGACY_ENGINES = (
+    EngineVariant.XP,
+    EngineVariant.VX,
+    EngineVariant.VX_ACE,
 )
 
 
@@ -26,7 +41,7 @@ class _Candidate:
     engine: EngineVariant
     source_root: Path
     game_root: Path
-    core_file: Path
+    marker_file: Path
     score: int
     evidence: tuple[str, ...]
 
@@ -63,7 +78,21 @@ def _read_text_head(path: Path, limit: int = 131072) -> str | None:
     return None
 
 
-def _score_candidate(
+def _casefold_child(root: Path, name: str) -> Path:
+    direct = root / name
+    if direct.exists():
+        return direct
+    try:
+        matches = [
+            child for child in root.iterdir()
+            if child.name.casefold() == name.casefold()
+        ]
+    except OSError:
+        return direct
+    return matches[0] if len(matches) == 1 else direct
+
+
+def _score_web_candidate(
     evidence_root: Path,
     source_root: Path,
     *,
@@ -98,7 +127,87 @@ def _score_candidate(
         engine=engine,
         source_root=source_root,
         game_root=game_root,
-        core_file=core,
+        marker_file=core,
+        score=score,
+        evidence=tuple(dict.fromkeys(evidence)),
+    )
+
+
+def _score_rgss_candidate(
+    evidence_root: Path,
+    source_root: Path,
+    *,
+    engine: EngineVariant,
+) -> _Candidate | None:
+    evidence: list[str] = []
+    score = 0
+    marker: Path | None = None
+
+    data_dir = _casefold_child(source_root, "Data")
+    suffix = script_suffix_for_engine(engine)
+
+    try:
+        data_files = [path for path in data_dir.iterdir() if path.is_file()]
+    except OSError:
+        data_files = []
+
+    scripts = next(
+        (
+            path for path in data_files
+            if path.name.casefold() == f"scripts{suffix}".casefold()
+        ),
+        None,
+    )
+    if scripts is not None:
+        score += 7
+        marker = scripts
+        evidence.append(_relative(scripts, evidence_root))
+
+    system = next(
+        (
+            path for path in data_files
+            if path.name.casefold() == f"system{suffix}".casefold()
+        ),
+        None,
+    )
+    if system is not None:
+        score += 2
+        evidence.append(_relative(system, evidence_root))
+
+    archive_suffix = archive_suffix_for_engine(engine)
+    try:
+        archives = [
+            path
+            for path in source_root.iterdir()
+            if path.is_file() and path.suffix.casefold() == archive_suffix
+        ]
+    except OSError:
+        archives = []
+    if archives:
+        score += 6
+        marker = marker or archives[0]
+        evidence.extend(_relative(path, evidence_root) for path in archives[:3])
+
+    for ini in find_rgss_inis(source_root):
+        scripts_engine = engine_from_scripts(ini.scripts)
+        library_engine = engine_from_library(ini.library)
+        if scripts_engine is engine:
+            score += 4
+            marker = marker or ini.path
+            evidence.append(_relative(ini.path, evidence_root))
+        elif library_engine is engine:
+            score += 3
+            marker = marker or ini.path
+            evidence.append(_relative(ini.path, evidence_root))
+
+    if score == 0 or marker is None:
+        return None
+
+    return _Candidate(
+        engine=engine,
+        source_root=source_root,
+        game_root=source_root,
+        marker_file=marker,
         score=score,
         evidence=tuple(dict.fromkeys(evidence)),
     )
@@ -107,56 +216,52 @@ def _score_candidate(
 def _collect_candidates(source_root: Path, *, evidence_root: Path) -> list[_Candidate]:
     candidates: list[_Candidate] = []
 
-    mv_www = _score_candidate(
-        evidence_root,
-        source_root,
-        engine=EngineVariant.MV,
-        game_root=source_root / "www",
-        core_name="rpg_core.js",
-    )
-    if mv_www:
-        candidates.append(mv_www)
+    for candidate in (
+        _score_web_candidate(
+            evidence_root,
+            source_root,
+            engine=EngineVariant.MV,
+            game_root=source_root / "www",
+            core_name="rpg_core.js",
+        ),
+        _score_web_candidate(
+            evidence_root,
+            source_root,
+            engine=EngineVariant.MV,
+            game_root=source_root,
+            core_name="rpg_core.js",
+        ),
+        _score_web_candidate(
+            evidence_root,
+            source_root,
+            engine=EngineVariant.MZ,
+            game_root=source_root,
+            core_name="rmmz_core.js",
+        ),
+        _score_web_candidate(
+            evidence_root,
+            source_root,
+            engine=EngineVariant.MZ,
+            game_root=source_root / "www",
+            core_name="rmmz_core.js",
+        ),
+    ):
+        if candidate:
+            candidates.append(candidate)
 
-    mv_root = _score_candidate(
-        evidence_root,
-        source_root,
-        engine=EngineVariant.MV,
-        game_root=source_root,
-        core_name="rpg_core.js",
-    )
-    if mv_root:
-        candidates.append(mv_root)
-
-    mz_root = _score_candidate(
-        evidence_root,
-        source_root,
-        engine=EngineVariant.MZ,
-        game_root=source_root,
-        core_name="rmmz_core.js",
-    )
-    if mz_root:
-        candidates.append(mz_root)
-
-    mz_www = _score_candidate(
-        evidence_root,
-        source_root,
-        engine=EngineVariant.MZ,
-        game_root=source_root / "www",
-        core_name="rmmz_core.js",
-    )
-    if mz_www:
-        candidates.append(mz_www)
+    for engine in _LEGACY_ENGINES:
+        candidate = _score_rgss_candidate(
+            evidence_root,
+            source_root,
+            engine=engine,
+        )
+        if candidate:
+            candidates.append(candidate)
 
     return candidates
 
 
 def _single_wrapper_child(root: Path) -> Path | None:
-    """
-    Return a single obvious wrapper directory, if present.
-
-    Extracted archives commonly contain one top-level folder around the actual
-    game. Hidden metadata directories such as __MACOSX are ignored.
-    """
     try:
         children = [
             child
@@ -167,7 +272,6 @@ def _single_wrapper_child(root: Path) -> Path | None:
         ]
     except OSError:
         return None
-
     return children[0] if len(children) == 1 else None
 
 
@@ -178,7 +282,7 @@ def _find_package_json(source_root: Path, game_root: Path) -> Path | None:
     return None
 
 
-def _detect_game_name(game_root: Path, package_json: Path | None) -> str | None:
+def _detect_web_game_name(game_root: Path, package_json: Path | None) -> str | None:
     system = _read_json(game_root / "data" / "System.json")
     if system:
         title = system.get("gameTitle")
@@ -196,7 +300,6 @@ def _detect_game_name(game_root: Path, package_json: Path | None) -> str | None:
             name = package.get("name")
             if isinstance(name, str) and name.strip():
                 return name.strip()
-
     return None
 
 
@@ -218,12 +321,10 @@ def _confidence_for_score(score: int) -> Confidence:
 
 def inspect_game(path: Path | str) -> GameInspection:
     """
-    Detect RPG Maker MV/MZ using engine-specific JavaScript runtime files.
+    Detect RPG Maker XP/VX/VX Ace/MV/MZ using generation-specific signatures.
 
-    Generic markers such as package.json are never sufficient on their own.
-    If the selected directory contains an unambiguous chain of wrapper
-    directories, RPGMFrame descends through it automatically. This handles
-    archives shaped like release/game/www without guessing across siblings.
+    Wrapper descent remains conservative: RPGMFrame only descends while there
+    is exactly one obvious child directory.
     """
     root = _normalize_path(path)
 
@@ -259,8 +360,8 @@ def inspect_game(path: Path | str) -> GameInspection:
         return GameInspection(
             source_path=root,
             warnings=[
-                "No RPG Maker MV/MZ engine core was found "
-                "(expected rpg_core.js or rmmz_core.js)."
+                "No supported RPG Maker engine signature was found "
+                "(XP/VX/VX Ace RGSS data or MV/MZ JavaScript core)."
             ],
         )
 
@@ -275,34 +376,82 @@ def inspect_game(path: Path | str) -> GameInspection:
                 source_path=root,
                 evidence=evidence,
                 warnings=[
-                    "Conflicting MV and MZ engine signatures have equal confidence; "
-                    "refusing to guess."
+                    "Conflicting RPG Maker generation signatures have equal "
+                    "confidence; refusing to guess."
                 ],
             )
 
-    package_json = _find_package_json(best.source_root, best.game_root)
     warnings: list[str] = []
     if wrapper_chain:
         warnings.append(
             "Auto-descended through wrapper directories: "
             f"{_relative(wrapper_chain[-1], root)}"
         )
-    if not (best.game_root / "data" / "System.json").is_file():
-        warnings.append(
-            "Engine core found, but data/System.json is missing; "
-            "this may be an incomplete game directory."
+
+    if best.engine in {EngineVariant.MV, EngineVariant.MZ}:
+        package_json = _find_package_json(best.source_root, best.game_root)
+        if not (best.game_root / "data" / "System.json").is_file():
+            warnings.append(
+                "Engine core found, but data/System.json is missing; "
+                "this may be an incomplete game directory."
+            )
+        return GameInspection(
+            source_path=root,
+            engine=best.engine,
+            runtime="nwjs",
+            confidence=_confidence_for_score(best.score),
+            game_root=best.game_root,
+            game_name=_detect_web_game_name(best.game_root, package_json)
+            or best.source_root.name,
+            engine_version=_detect_engine_version(best.marker_file),
+            package_json=package_json,
+            evidence=list(best.evidence),
+            warnings=warnings,
+            compatibility=Compatibility.SUPPORTED,
         )
+
+    ini = choose_rgss_ini(best.game_root, best.engine)
+    if ini is None:
+        warnings.append(
+            "RGSS generation was detected from game data, but no unambiguous "
+            "RPG Maker [Game] INI was found. mkxp-z can still try its defaults."
+        )
+
+    data_dir = _casefold_child(best.game_root, "Data")
+    try:
+        has_script_data = any(
+            path.is_file() and engine_from_scripts(path.name) is best.engine
+            for path in data_dir.iterdir()
+        )
+    except OSError:
+        has_script_data = False
+    try:
+        has_archive = any(
+            path.is_file() and engine_from_archive(path) is best.engine
+            for path in best.game_root.iterdir()
+        )
+    except OSError:
+        has_archive = False
+    if not has_script_data and not has_archive:
+        warnings.append(
+            "RGSS metadata was found, but neither the expected Scripts data "
+            "nor encrypted game archive was found."
+        )
+
+    version = None
+    if ini and ini.library:
+        version = Path(ini.library.replace("\\", "/")).stem
 
     return GameInspection(
         source_path=root,
         engine=best.engine,
-        runtime="nwjs",
+        runtime="mkxp-z",
         confidence=_confidence_for_score(best.score),
         game_root=best.game_root,
-        game_name=_detect_game_name(best.game_root, package_json) or best.source_root.name,
-        engine_version=_detect_engine_version(best.core_file),
-        package_json=package_json,
+        game_name=(ini.title if ini and ini.title else best.source_root.name),
+        engine_version=version,
+        package_json=None,
         evidence=list(best.evidence),
         warnings=warnings,
-        compatibility=Compatibility.SUPPORTED,
+        compatibility=Compatibility.NEEDS_TESTING,
     )

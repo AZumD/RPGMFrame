@@ -106,11 +106,11 @@ def test_summary_is_buildable_only_for_supported_current_backends() -> None:
         engine_version=None,
         game_name="XP",
         confidence="high",
-        compatibility="planned",
+        compatibility="needs_testing",
         warnings=(),
         evidence=(),
     )
 
     assert summary_is_buildable(mv)
     assert not summary_is_buildable(unknown)
-    assert not summary_is_buildable(future_xp)
+    assert summary_is_buildable(future_xp)

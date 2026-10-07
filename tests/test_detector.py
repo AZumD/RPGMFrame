@@ -158,3 +158,56 @@ def test_auto_descends_multiple_wrapper_directories(tmp_path: Path) -> None:
     assert result.package_json == wrapper / "package.json"
     assert "OMORI.v1.0.8d/OMORI/www/js/rpg_core.js" in result.evidence
     assert any("OMORI.v1.0.8d/OMORI" in warning for warning in result.warnings)
+
+
+def test_detects_rpg_maker_xp_from_renamed_ini_and_archive(tmp_path: Path) -> None:
+    _write(
+        tmp_path / "To the Moon.ini",
+        "[Game]\n"
+        "Library=RGSS104E.dll\n"
+        "Scripts=Data\\Scripts.rxdata\n"
+        "Title=To the Moon\n"
+        "RTP1=Standard\n",
+    )
+    _write(tmp_path / "To the Moon.rgssad", "encrypted fixture")
+
+    result = inspect_game(tmp_path)
+
+    assert result.engine is EngineVariant.XP
+    assert result.runtime == "mkxp-z"
+    assert result.compatibility is Compatibility.NEEDS_TESTING
+    assert result.confidence is Confidence.HIGH
+    assert result.game_root == tmp_path
+    assert result.game_name == "To the Moon"
+    assert result.engine_version == "RGSS104E"
+    assert "To the Moon.ini" in result.evidence
+    assert "To the Moon.rgssad" in result.evidence
+
+
+def test_detects_rpg_maker_vx_from_scripts_data(tmp_path: Path) -> None:
+    _write(
+        tmp_path / "Game.ini",
+        "[Game]\nLibrary=RGSS202E.dll\nScripts=Data\\Scripts.rvdata\nTitle=VX Game\n",
+    )
+    _write(tmp_path / "Data/Scripts.rvdata", "fixture")
+    _write(tmp_path / "Data/System.rvdata", "fixture")
+
+    result = inspect_game(tmp_path)
+
+    assert result.engine is EngineVariant.VX
+    assert result.runtime == "mkxp-z"
+    assert result.game_name == "VX Game"
+
+
+def test_detects_rpg_maker_vx_ace_from_scripts_data(tmp_path: Path) -> None:
+    _write(
+        tmp_path / "Game.ini",
+        "[Game]\nLibrary=RGSS301.dll\nScripts=Data\\Scripts.rvdata2\nTitle=Ace Game\n",
+    )
+    _write(tmp_path / "Data/Scripts.rvdata2", "fixture")
+
+    result = inspect_game(tmp_path)
+
+    assert result.engine is EngineVariant.VX_ACE
+    assert result.runtime == "mkxp-z"
+    assert result.game_name == "Ace Game"

@@ -13,6 +13,9 @@ class EngineFamily(str, Enum):
 
 
 class EngineVariant(str, Enum):
+    XP = "xp"
+    VX = "vx"
+    VX_ACE = "vxace"
     MV = "mv"
     MZ = "mz"
     UNKNOWN = "unknown"
@@ -70,7 +73,7 @@ class GameInspection:
 
 @dataclass
 class BuildResult:
-    """Result of producing an ARM64 NW.js game directory."""
+    """Result of producing a Linux ARM64 game directory."""
 
     success: bool
     source_path: Path

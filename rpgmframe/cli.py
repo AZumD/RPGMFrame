@@ -33,20 +33,21 @@ def _build_parser() -> argparse.ArgumentParser:
 
     build_parser = subparsers.add_parser(
         "build",
-        help="Build a Linux ARM64 package, downloading NW.js when needed.",
+        help="Build a Linux ARM64 package with the matching engine runtime.",
     )
     build_parser.add_argument("path", type=Path, help="RPG Maker game directory or .zip archive")
     build_parser.add_argument(
         "--runtime",
         type=Path,
-        help="Use this extracted Linux ARM64 NW.js runtime instead of the cache",
+        help="Use this extracted Linux ARM64 runtime instead of the cache (NW.js or mkxp-z)",
     )
     build_parser.add_argument(
         "--runtime-version",
         default=DEFAULT_NWJS_VERSION,
         help=(
-            "NW.js version to download/use when --runtime is omitted "
-            f"(default: {DEFAULT_NWJS_VERSION})"
+            "NW.js version for MV/MZ when --runtime is omitted; "
+            "XP/VX/VX Ace use RPGMFrame's pinned mkxp-z artifact "
+            f"(default NW.js: {DEFAULT_NWJS_VERSION})"
         ),
     )
     build_parser.add_argument(
