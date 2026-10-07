@@ -23,6 +23,55 @@ class MkxpBuildError(RuntimeError):
 _LEGACY_ENGINES = {EngineVariant.XP, EngineVariant.VX, EngineVariant.VX_ACE}
 _IGNORE_NAMES = frozenset({".git", "__pycache__", ".DS_Store"})
 
+_LEGACY_BOOL_KEYS = frozenset(
+    {
+        "fullscreen",
+        "winResizable",
+        "anyAltToggleFS",
+        "vsync",
+        "subImageFix",
+        "enableBlitting",
+        "fixedAspectRatio",
+        "enableReset",
+        "enableSettings",
+        "allowSymlinks",
+        "pathCache",
+        "frameSkip",
+        "syncToRefreshrate",
+    }
+)
+_LEGACY_INTEGER_KEYS = frozenset(
+    {
+        "smoothScaling",
+        "smoothScalingDown",
+        "bitmapSmoothScaling",
+        "bitmapSmoothScalingDown",
+        "fontHinting",
+        "fontHeightReporting",
+    }
+)
+_LEGACY_STRING_KEYS = frozenset(
+    {
+        "dataPathOrg",
+        "dataPathApp",
+        "execName",
+        "windowTitle",
+        "midiSoundFont",
+        "iconPath",
+    }
+)
+_LEGACY_LIST_KEYS = frozenset(
+    {
+        "RTP",
+        "fontSub",
+        "preloadScript",
+        "postloadScript",
+        "patches",
+        "rubyLoadpath",
+        "solidFonts",
+    }
+)
+
 
 def _normalize_path(path: Path | str) -> Path:
     return Path(path).expanduser().resolve()
@@ -83,28 +132,179 @@ def _write_launcher(root: Path) -> Path:
     return launcher
 
 
+def _strip_legacy_value(value: str) -> str:
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        return value[1:-1]
+    return value
+
+
+def _legacy_bool(value: str) -> bool | None:
+    normalized = value.strip().casefold()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    return None
+
+
+def _read_legacy_mkxp_conf(game_root: Path) -> tuple[dict[str, object], Path | None]:
+    try:
+        candidates = [
+            path
+            for path in game_root.iterdir()
+            if path.is_file() and path.name.casefold() == "mkxp.conf"
+        ]
+    except OSError:
+        return {}, None
+
+    if len(candidates) != 1:
+        return {}, None
+    path = candidates[0]
+
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return {}, path
+
+    text: str | None = None
+    for encoding in ("utf-8-sig", "cp1252", "latin-1"):
+        try:
+            text = data.decode(encoding)
+            break
+        except UnicodeDecodeError:
+            continue
+    if text is None:
+        return {}, path
+
+    config: dict[str, object] = {}
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith(("#", ";")) or "=" not in line:
+            continue
+        key, raw_value = line.split("=", 1)
+        key = key.strip()
+        value = _strip_legacy_value(raw_value)
+        if not key:
+            continue
+
+        if key in _LEGACY_BOOL_KEYS:
+            parsed = _legacy_bool(value)
+            if parsed is not None:
+                config[key] = parsed
+        elif key in _LEGACY_INTEGER_KEYS:
+            parsed_bool = _legacy_bool(value)
+            if parsed_bool is not None:
+                config[key] = int(parsed_bool)
+            else:
+                try:
+                    config[key] = int(value)
+                except ValueError:
+                    pass
+        elif key in _LEGACY_STRING_KEYS:
+            config[key] = value
+        elif key in _LEGACY_LIST_KEYS:
+            items = config.setdefault(key, [])
+            if isinstance(items, list) and value:
+                items.append(value)
+
+    return config, path
+
+
+def _looks_like_legacy_mkxp_distribution(game_root: Path, legacy_conf: Path | None) -> bool:
+    if legacy_conf is None:
+        return False
+    try:
+        return any(
+            path.is_file()
+            and path.suffix.casefold() == ".exe"
+            and path.stem.casefold().startswith("mkxp")
+            for path in game_root.iterdir()
+        )
+    except OSError:
+        return False
+
+
+def _migration_preloads(
+    game_root: Path,
+    runtime_root: Path,
+    legacy_conf: Path | None,
+    configured: object,
+) -> list[str]:
+    preloads: list[str] = []
+
+    def add(path: str) -> None:
+        if path not in preloads:
+            preloads.append(path)
+
+    for name in ("ruby_classic_wrap.rb", "mkxp_wrap.rb"):
+        if (runtime_root / "scripts" / "preload" / name).is_file():
+            add(f"../scripts/preload/{name}")
+
+    configured_items = configured if isinstance(configured, list) else []
+    for item in configured_items:
+        if isinstance(item, str) and item.strip():
+            add(item.strip())
+
+    bundled_win32 = False
+    if _looks_like_legacy_mkxp_distribution(game_root, legacy_conf):
+        preload_dir = game_root / "preload"
+        if preload_dir.is_dir():
+            for path in sorted(preload_dir.glob("*.rb"), key=lambda p: p.name.casefold()):
+                add(f"preload/{path.name}")
+                if path.name.casefold() == "win32_wrap.rb":
+                    bundled_win32 = True
+
+    runtime_win32 = runtime_root / "scripts" / "preload" / "win32_wrap.rb"
+    if not bundled_win32 and runtime_win32.is_file():
+        add("../scripts/preload/win32_wrap.rb")
+
+    return preloads
+
+
 def _write_mkxp_config(
     destination: Path,
     *,
     game_root: Path,
+    runtime_root: Path,
     engine: EngineVariant,
-) -> tuple[str | None, tuple[str, ...]]:
+) -> tuple[str | None, tuple[str, ...], bool]:
     ini = choose_rgss_ini(game_root, engine)
+    legacy, legacy_path = _read_legacy_mkxp_conf(game_root)
+
     config: dict[str, object] = {
-        "gameFolder": "game",
-        "rgssVersion": rgss_version_for_engine(engine),
         "winResizable": True,
         "fixedAspectRatio": True,
-        "pathCache": True,
     }
-    if ini is not None:
+    config.update(legacy)
+
+    # Required portable/backend settings win over legacy values.
+    config["gameFolder"] = "."
+    config["rgssVersion"] = rgss_version_for_engine(engine)
+    config["pathCache"] = True
+
+    if "execName" not in config and ini is not None:
         config["execName"] = ini.exec_name
+
+    preloads = _migration_preloads(
+        game_root,
+        runtime_root,
+        legacy_path,
+        config.get("preloadScript"),
+    )
+    if preloads:
+        config["preloadScript"] = preloads
 
     destination.write_text(
         json.dumps(config, ensure_ascii=False, indent=4) + "\n",
         encoding="utf-8",
     )
-    return (ini.exec_name if ini else None, ini.rtps if ini else ())
+    exec_name = config.get("execName")
+    return (
+        exec_name if isinstance(exec_name, str) else None,
+        ini.rtps if ini else (),
+        legacy_path is not None,
+    )
 
 
 def _has_wma(root: Path) -> bool:
@@ -189,13 +389,18 @@ def build_mkxp_game(
             ignore_dangling_symlinks=True,
         )
 
-        exec_name, rtps = _write_mkxp_config(
-            staging / "mkxp.json",
+        exec_name, rtps, migrated_legacy_conf = _write_mkxp_config(
+            game_destination / "mkxp.json",
             game_root=inspection.game_root,
+            runtime_root=staging,
             engine=inspection.engine,
         )
         if exec_name:
             warnings.append(f"Configured mkxp-z executable/archive stem: {exec_name}")
+        if migrated_legacy_conf:
+            warnings.append(
+                "Migrated compatible settings from the game's legacy mkxp.conf"
+            )
         if rtps:
             warnings.append(
                 "Game declares RPG Maker RTP dependencies "

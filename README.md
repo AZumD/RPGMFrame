@@ -159,9 +159,12 @@ small `mkxp.json` that selects the correct RGSS generation, enables mkxp-z's
 case-insensitive path cache, and preserves renamed executable/archive stems via
 `execName`. The original game payload is copied under `game/` unchanged.
 
-The mkxp-z backend is currently marked `needs_testing` until it has been
-validated on Steam Frame hardware. mkxp-z itself documents Linux ARM support,
-and its upstream CI produces an ARM64 Linux artifact.
+The mkxp-z backend has now booted an RPG Maker XP title to its title screen on
+Steam Frame hardware. Deeper gameplay still needs broader validation. Existing
+legacy mkxp deployments are migrated conservatively: RPGMFrame translates known
+`mkxp.conf` settings, enables upstream compatibility preloads, uses a portable
+`SRCDIR`-based game root, and disables SDL HiDPI backing by default to avoid
+fractional-scale pointer drift.
 
 
 ### Godot backend

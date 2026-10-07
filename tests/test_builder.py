@@ -391,14 +391,16 @@ def test_builds_rpg_maker_xp_with_arm64_mkxpz(tmp_path: Path) -> None:
     assert (output / "game/To the Moon.ini").is_file()
     assert (output / "launch.sh").is_file()
 
-    config = json.loads((output / "mkxp.json").read_text(encoding="utf-8"))
-    assert config["gameFolder"] == "game"
+    config = json.loads((output / "game/mkxp.json").read_text(encoding="utf-8"))
+    assert config["gameFolder"] == "."
     assert config["rgssVersion"] == 1
     assert config["execName"] == "To the Moon"
     assert config["pathCache"] is True
 
     launcher = (output / "launch.sh").read_text(encoding="utf-8")
     assert "plasmashell" in launcher
+    assert 'export SRCDIR="$ROOT/game"' in launcher
+    assert 'SDL_VIDEO_HIGHDPI_DISABLED=' in launcher
     assert 'exec "$ROOT/mkxp-z.aarch64" "$@"' in launcher
 
 
@@ -451,3 +453,87 @@ def test_builds_embedded_godot_export_by_extracting_pck(tmp_path: Path) -> None:
     assert result.engine is EngineVariant.GODOT
     assert (output / "game/Embedded Game.pck").read_bytes() == pck
     assert not (output / "game/Embedded Game.exe").exists()
+
+
+
+def test_migrates_legacy_mkxp_distribution_settings_and_preloads(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "legacy-mkxp"
+    _write(
+        source / "Legacy.ini",
+        "[Game]\n"
+        "Library=RGSS104E.dll\n"
+        "Scripts=Data\\Scripts.rxdata\n"
+        "Title=Legacy Game\n",
+    )
+    _write(source / "Legacy.rgssad", "encrypted fixture")
+    _write(
+        source / "mkxp.conf",
+        "fullscreen=true\n"
+        "smoothScaling=false\n"
+        "dataPathOrg=Example Studio\n"
+        "dataPathApp=/\n"
+        "execName=Legacy\n"
+        "RTP=lang.dat\n"
+        "fontSub=Arial>Open Sans\n"
+        "fontSub=Times New Roman>Liberation Serif\n",
+    )
+    _write(source / "mkxp-console.exe", "old Windows runtime")
+    _write(source / "preload/ruby18_comp.rb", "# compatibility")
+    _write(source / "preload/win32_wrap.rb", "# compatibility")
+
+    runtime = tmp_path / "mkxpz"
+    _write_elf(runtime / "mkxp-z.aarch64", 183)
+    _write(runtime / "LICENSE.txt", "GPL")
+    _write(runtime / "stdlib/aarch64-linux/rbconfig.rb", "fixture")
+    _write(runtime / "scripts/preload/ruby_classic_wrap.rb", "# wrapper")
+    _write(runtime / "scripts/preload/mkxp_wrap.rb", "# wrapper")
+    _write(runtime / "scripts/preload/win32_wrap.rb", "# wrapper")
+
+    output = tmp_path / "built"
+    result = build_game(source, runtime=runtime, output=output)
+
+    config = json.loads((output / "game/mkxp.json").read_text(encoding="utf-8"))
+    assert config["gameFolder"] == "."
+    assert config["fullscreen"] is True
+    assert config["smoothScaling"] == 0
+    assert config["dataPathOrg"] == "Example Studio"
+    assert config["dataPathApp"] == "/"
+    assert config["execName"] == "Legacy"
+    assert config["RTP"] == ["lang.dat"]
+    assert config["fontSub"] == [
+        "Arial>Open Sans",
+        "Times New Roman>Liberation Serif",
+    ]
+    assert config["preloadScript"] == [
+        "../scripts/preload/ruby_classic_wrap.rb",
+        "../scripts/preload/mkxp_wrap.rb",
+        "preload/ruby18_comp.rb",
+        "preload/win32_wrap.rb",
+    ]
+    assert any("legacy mkxp.conf" in warning for warning in result.warnings)
+
+
+def test_mkxp_launcher_disables_hidpi_fractional_pointer_scaling(tmp_path: Path) -> None:
+    source = tmp_path / "xp"
+    _write(
+        source / "Game.ini",
+        "[Game]\nLibrary=RGSS104E.dll\nScripts=Data\\Scripts.rxdata\n",
+    )
+    _write(source / "Data/Scripts.rxdata", "fixture")
+
+    runtime = tmp_path / "mkxpz"
+    _write_elf(runtime / "mkxp-z.aarch64", 183)
+    _write(runtime / "LICENSE.txt", "GPL")
+    _write(runtime / "stdlib/aarch64-linux/rbconfig.rb", "fixture")
+    _write(runtime / "scripts/preload/ruby_classic_wrap.rb", "# wrapper")
+    _write(runtime / "scripts/preload/mkxp_wrap.rb", "# wrapper")
+    _write(runtime / "scripts/preload/win32_wrap.rb", "# wrapper")
+
+    output = tmp_path / "built"
+    build_game(source, runtime=runtime, output=output)
+
+    launcher = (output / "launch.sh").read_text(encoding="utf-8")
+    assert 'export SRCDIR="$ROOT/game"' in launcher
+    assert 'SDL_VIDEO_HIGHDPI_DISABLED' in launcher

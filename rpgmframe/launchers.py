@@ -66,7 +66,16 @@ exec "$ROOT/nw" "$ROOT" "$@"
 
 
 def mkxp_launcher_body() -> str:
-    return _FRAME_ENV_PREAMBLE + r'''cd "$ROOT"
+    return _FRAME_ENV_PREAMBLE + r'''# mkxp-z's Linux build honors SRCDIR before reading mkxp.json. Point it at
+# the copied game so the package remains relocatable and gameFolder can stay ".".
+export SRCDIR="$ROOT/game"
+
+# mkxp-z currently truncates fractional drawable/window scale factors when
+# converting mouse coordinates. Disable SDL HiDPI backing so pointer and game
+# coordinates remain in the same pixel space on fractional-scale desktops.
+export SDL_VIDEO_HIGHDPI_DISABLED="${SDL_VIDEO_HIGHDPI_DISABLED:-1}"
+
+cd "$ROOT"
 exec "$ROOT/mkxp-z.aarch64" "$@"
 '''
 

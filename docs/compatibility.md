@@ -171,3 +171,32 @@ Current conservative boundaries:
 - Releases without an official Linux ARM64 binary are recognized but not built.
 - Windows native plugins may require Linux ARM64 GDNative/GDExtension builds.
 - Godot support is marked `needs_testing` until validated on Steam Frame hardware.
+
+
+### mkxp-z migration and fractional-scale input
+
+Steam Frame hardware validation with an existing Windows mkxp-based RPG Maker XP
+release exposed several portable mkxp-z integration requirements:
+
+- Linux mkxp-z can honor the `SRCDIR` environment variable before reading
+  `mkxp.json`. RPGMFrame sets it to the copied `game/` directory and writes
+  the generated config there with `"gameFolder": "."`. This avoids mkxp-z's
+  fragile relative-directory verification while keeping transfer archives
+  relocatable.
+- RPGMFrame enables mkxp-z's upstream classic Ruby, old-mkxp API, and Win32
+  compatibility wrappers. If a legacy mkxp distribution ships its own
+  `preload/*.rb` compatibility files, those are preserved after the upstream
+  wrappers; a bundled Win32 wrapper takes precedence over mkxp-z's generic one.
+- A legacy `mkxp.conf` is parsed conservatively. Recognized display, save-path,
+  executable-name, RTP, font-substitution, and explicit preload values are
+  translated into modern `mkxp.json`; unknown keys are left untouched in the
+  copied source rather than guessed.
+- The launcher defaults `SDL_VIDEO_HIGHDPI_DISABLED=1`. The pinned mkxp-z
+  build computes its drawable/window backing scale with integer division, which
+  mis-scales mouse coordinates on fractional-scale desktops. Keeping SDL window
+  and drawable coordinates in one pixel space fixes the pointer drift observed
+  on Steam Frame. Callers can explicitly override the environment variable.
+
+To the Moon was used as the hardware stress test for these behaviors. The
+converted ARM64 build reached and rendered the title screen after the generic
+migration fixes; deeper gameplay remains to be validated.
